@@ -44,6 +44,22 @@ export function AppShell() {
         void openNote(match[1]!);
     }, [hydrated, openNote]);
     useEffect(() => {
+        if (!hydrated)
+            return;
+        const params = new URLSearchParams(location.search);
+        const fid = params.get('folder') || params.get('folderId');
+        if (!fid || !/^[0-9a-hjkmnp-tv-z]{26}$/.test(fid))
+            return;
+        const folders = useNotes.getState().folders as unknown as { id: string }[];
+        if (!folders?.some((f) => f.id === fid))
+            return;
+        useUi.getState().openView('folder', { folderId: fid });
+        params.delete('folder');
+        params.delete('folderId');
+        const qs = params.toString();
+        history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+    }, [hydrated]);
+    useEffect(() => {
         if (role === 'owner')
             void checkForUpdates();
     }, [role, checkForUpdates]);

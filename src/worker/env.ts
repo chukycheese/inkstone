@@ -27,6 +27,9 @@ export interface Env {
   AI?: {
     run: <T = unknown>(model: string, inputs: unknown) => Promise<T>
   }
+
+  /** Optional jina Reader API key to avoid 429 rate limits on Worker egress IPs. */
+  JINA_API_KEY?: string
 }
 
 export interface DatabaseState {

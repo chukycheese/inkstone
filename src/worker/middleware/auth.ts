@@ -110,6 +110,11 @@ export const requireAuth = createMiddleware<AppBindings>(async (c, next) => {
 export const requireClientHeader = createMiddleware<AppBindings>(async (c, next) => {
   const method = c.req.method.toUpperCase()
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    // Shortcut-friendly capture endpoint authenticates via Bearer ink_ token
+    if (new URL(c.req.url).pathname.startsWith('/api/capture')) {
+      await next()
+      return
+    }
     if (c.req.header(CLIENT_HEADER) !== '1') {
       throw new ApiError(403, 'forbidden', 'Missing client identification header. Refresh and try again')
     }

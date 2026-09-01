@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>WFWorkflow</key>
+	<dict>
+		<key>WFWorkflowActions</key>
+		<array>
+			<dict>
+				<key>WFWorkflowActionIdentifier</key>
+				<string>is.workflow.actions.detect.link</string>
+				<key>WFWorkflowActionParameters</key>
+				<dict/>
+			</dict>
+			<dict>
+				<key>WFWorkflowActionIdentifier</key>
+				<string>is.workflow.actions.text</string>
+				<key>WFWorkflowActionParameters</key>
+				<dict>
+					<key>WFTextActionText</key>
+					<string># {ShortcutInput}
+&gt; 출처: {ShortcutInput}
+&gt; 수집: {CurrentDate}
+
+{ShortcutInput}</string>
+				</dict>
+			</dict>
+			<dict>
+				<key>WFWorkflowActionIdentifier</key>
+				<string>is.workflow.actions.setvariable</string>
+				<key>WFWorkflowActionParameters</key>
+				<dict>
+					<key>WFVariableName</key>
+					<string>FormattedContent</string>
+				</dict>
+			</dict>
+			<dict>
+				<key>WFWorkflowActionIdentifier</key>
+				<string>is.workflow.actions.downloadurl</string>
+				<key>WFWorkflowActionParameters</key>
+				<dict>
+					<key>WFHTTPBodyType</key>
+					<string>JSON</string>
+					<key>WFHTTPHeaders</key>
+					<dict>
+						<key>Authorization</key>
+						<string>Bearer {inkKey}</string>
+						<key>Content-Type</key>
+						<string>application/json</string>
+					</dict>
+					<key>WFHTTPMethod</key>
+					<string>POST</string>
+					<key>WFJSONBody</key>
+					<dict>
+						<key>content</key>
+						<string>{FormattedContent}</string>
+						<key>folderId</key>
+						<string>01m0m5w6n0mgdv2797hcygkpd1</string>
+						<key>title</key>
+						<string>{ShortcutInput}</string>
+						<key>url</key>
+						<string>{ShortcutInput}</string>
+					</dict>
+					<key>WFURL</key>
+					<string>https://inkstone.inkstone.workers.dev/api/capture</string>
+				</dict>
+			</dict>
+			<dict>
+				<key>WFWorkflowActionIdentifier</key>
+				<string>is.workflow.actions.notification</string>
+				<key>WFWorkflowActionParameters</key>
+				<dict>
+					<key>WFNotificationActionBody</key>
+					<string>위키에 저장되었습니다</string>
+					<key>WFNotificationActionTitle</key>
+					<string>✅ 저장 완료!</string>
+				</dict>
+			</dict>
+		</array>
+		<key>WFWorkflowClientRelease</key>
+		<string>18.0</string>
+		<key>WFWorkflowClientVersion</key>
+		<string>1302.1.3</string>
+		<key>WFWorkflowHasOutputFallback</key>
+		<false/>
+		<key>WFWorkflowHasShortcutInputVariables</key>
+		<true/>
+		<key>WFWorkflowIcon</key>
+		<dict>
+			<key>WFWorkflowIconGlyphNumber</key>
+			<integer>59669</integer>
+			<key>WFWorkflowIconStartColor</key>
+			<integer>4282601983</integer>
+		</dict>
+		<key>WFWorkflowImportQuestions</key>
+		<array>
+			<dict>
+				<key>WFWorkflowImportQuestionDefaultValue</key>
+				<string>ink_...</string>
+				<key>WFWorkflowImportQuestionPrompt</key>
+				<string>Inkstone API 키 (ink_...)를 입력하세요</string>
+				<key>WFWorkflowImportQuestionType</key>
+				<string>Text</string>
+				<key>WFWorkflowImportQuestionVariable</key>
+				<string>inkKey</string>
+			</dict>
+		</array>
+		<key>WFWorkflowInputContentItemClasses</key>
+		<array>
+			<string>WFURLContentItem</string>
+			<string>WFTextContentItem</string>
+			<string>WFSafariWebPageContentItem</string>
+			<string>WFArticleContentItem</string>
+			<string>WFStringContentItem</string>
+		</array>
+		<key>WFWorkflowMinimumClientVersion</key>
+		<integer>900</integer>
+		<key>WFWorkflowMinimumClientVersionString</key>
+		<string>900</string>
+		<key>WFWorkflowName</key>
+		<string>Chuky Wiki Capture</string>
+		<key>WFWorkflowOutputContentItemClasses</key>
+		<array/>
+		<key>WFWorkflowTypes</key>
+		<array>
+			<string>ActionExtension</string>
+			<string>MenuBar</string>
+			<string>QuickActions</string>
+		</array>
+	</dict>
+</dict>
+</plist>
