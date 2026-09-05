@@ -110,8 +110,9 @@ export const requireAuth = createMiddleware<AppBindings>(async (c, next) => {
 export const requireClientHeader = createMiddleware<AppBindings>(async (c, next) => {
   const method = c.req.method.toUpperCase()
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
-    // Shortcut-friendly capture endpoint authenticates via Bearer ink_ token
-    if (new URL(c.req.url).pathname.startsWith('/api/capture')) {
+    // Shortcut-friendly capture/distill endpoints authenticate via Bearer ink_ token
+    const pathname = new URL(c.req.url).pathname
+    if (pathname.startsWith('/api/capture') || pathname.startsWith('/api/distill')) {
       await next()
       return
     }
