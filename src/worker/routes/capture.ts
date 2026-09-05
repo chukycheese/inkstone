@@ -97,7 +97,17 @@ captureRoutes.post('/', async (c) => {
         const resp = await fetch(jinaHtml, { headers: { Accept: 'text/markdown' }, signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined })
         if (resp.ok) {
           const t = (await resp.text()).trim()
-          if (t.length > 500) pdfContent = t.slice(0, LIMITS.contentMaxBytes - 1024)
+          if (!looksLikeBrokenArxiv(t)) pdfContent = t.slice(0, LIMITS.contentMaxBytes - 1024)
+        }
+        if (!pdfContent) {
+          const ar5iv = ar5ivRewrite(htmlUrl)
+          if (ar5iv) {
+            const resp5 = await fetch(`https://r.jina.ai/http://${ar5iv.replace(/^https?:\/\//, '')}`, { headers: { Accept: 'text/markdown' }, signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined })
+            if (resp5.ok) {
+              const t5 = (await resp5.text()).trim()
+              if (!looksLikeBrokenArxiv(t5)) pdfContent = t5.slice(0, LIMITS.contentMaxBytes - 1024)
+            }
+          }
         }
       }
       if (!pdfContent) {
@@ -149,7 +159,6 @@ captureRoutes.post('/', async (c) => {
     // Server-side fetch via r.jina.ai so shortcut only needs to send URL (for articles/show notes)
     try {
       const clean = url.replace(/^https?:\/\//, '')
-      const jinaUrl = `https://r.jina.ai/http://${clean}`
       const jinaHeaders: Record<string, string> = {
         Accept: 'text/markdown',
         'X-Return-Format': 'markdown',
@@ -158,23 +167,29 @@ captureRoutes.post('/', async (c) => {
       // Optional jina API key avoids 429 rate limits on Worker egress IPs
       const jinaKey = c.env.JINA_API_KEY
       if (jinaKey) jinaHeaders['Authorization'] = `Bearer ${jinaKey}`
-      const resp = await fetch(jinaUrl, {
-        headers: jinaHeaders,
-        // jina can be slow (15s+ for some sites); allow 25s
-        signal: AbortSignal.timeout ? AbortSignal.timeout(25000) : undefined,
-      })
-      if (resp.ok) {
-        const text = await resp.text()
-        const trimmed = text.trim()
-        if (trimmed.length > 200) {
-          // r.jina.ai returns markdown with title at top, keep it
-          content = trimmed.slice(0, LIMITS.contentMaxBytes - 1024)
-        } else {
-          console.warn(`[capture] jina short body (${trimmed.length} chars) for ${url}`)
-          content = url
+      const fetchJina = async (src: string) => {
+        const resp = await fetch(`https://r.jina.ai/http://${src.replace(/^https?:\/\//, '')}`, {
+          headers: jinaHeaders,
+          // jina can be slow (15s+ for some sites); allow 25s
+          signal: AbortSignal.timeout ? AbortSignal.timeout(25000) : undefined,
+        })
+        if (!resp.ok) {
+          console.warn(`[capture] jina ${resp.status} for ${src}`)
+          return null
         }
+        return (await resp.text()).trim()
+      }
+      let trimmed = await fetchJina(clean)
+      if (trimmed && looksLikeBrokenArxiv(trimmed)) {
+        const ar5iv = ar5ivRewrite(url)
+        const ar5ivBody = ar5iv ? await fetchJina(ar5iv) : null
+        trimmed = ar5ivBody && !looksLikeBrokenArxiv(ar5ivBody) ? ar5ivBody : null
+      }
+      if (trimmed && trimmed.length > 200) {
+        // r.jina.ai returns markdown with title at top, keep it
+        content = trimmed.slice(0, LIMITS.contentMaxBytes - 1024)
       } else {
-        console.warn(`[capture] jina ${resp.status} for ${url}`)
+        if (trimmed) console.warn(`[capture] jina short body (${trimmed.length} chars) for ${url}`)
         content = url
       }
     } catch (e) {
@@ -225,7 +240,24 @@ captureRoutes.post('/', async (c) => {
   )
 })
 
-async function resolveCaptureUserId(c: {
+function looksLikeBrokenArxiv(body: string): boolean {
+  if (!body) return true
+  if (body.length < 500) return true
+  const firstLine = body.split('\n').find((l) => l.trim())?.trim() ?? ''
+  if (firstLine.endsWith('.svg')) return true
+  // arXiv's JS-only HTML reader renders as a "Report GitHub Issue" panel
+  // (Content selection saved...) when the article fails to hydrate.
+  if (/Report GitHub Issue|Content selection saved/i.test(firstLine)) return true
+  return false
+}
+
+function ar5ivRewrite(url: string): string | null {
+  const id = url.match(/arxiv\.org\/html\/([^/?#]+)/i)?.[1]
+  if (!id) return null
+  return `https://ar5iv.labs.arxiv.org/html/${id.replace(/v\d+$/i, '')}`
+}
+
+export async function resolveCaptureUserId(c: {
   req: { header: (name: string) => string | undefined }
   get: (key: 'userId') => string | undefined
   env: AppBindings['Bindings']
