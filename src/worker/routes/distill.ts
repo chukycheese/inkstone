@@ -7,22 +7,15 @@ import { enqueueNoteIndex } from '../mcp/ai-search'
 import { getMcpPreferences } from '../mcp/settings'
 import { editMcpNote, type McpWriteContext } from '../mcp/writes'
 import { getMeta, setMeta } from '../db/metadata'
+import { runChatModel } from '../lib/ai-chat'
 import { DATABASE_STATE_KEY } from '../db/schema'
 import { resolveCaptureUserId } from './capture'
 
 export const distillRoutes = new Hono<AppBindings>()
 
-// Primary and fallback Workers AI chat models. Every model in the chain must
-// accept { messages, max_tokens } so one prompt shape works across fallbacks.
-const DISTILL_MODEL_CHAIN = [
-  '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-  '@cf/qwen/qwen3-30b-a3b-fp8',
-]
-
 const DISTILL_MARKER = '> status: distilled'
 const DISTILL_SOURCE_MARKER = 'Markdown Content:'
 const DISTILL_BODY_CHARS = 12000
-const DISTILL_MAX_OUTPUT_TOKENS = 1200
 const DISTILL_MIN_BODY_CHARS = 400
 const CRON_DAILY_META_KEY = 'distill:last_cron_day'
 
@@ -230,7 +223,7 @@ async function distillOne(
   ].join('\n')
   const user = `제목: ${row.title}\n\n본문:\n${body}`
 
-  const markdown = await runDistillModel(context.env.AI, system, user)
+  const markdown = await runChatModel(context.env.AI, { system, user }, 'distill')
   if (!markdown) {
     console.warn(`[distill] all models failed for ${row.id}`)
     return { ok: false, note_id: row.id, title: row.title, error: 'all distill models failed' }
@@ -252,32 +245,6 @@ async function distillOne(
     console.warn(`[distill] write failed for ${row.id}: ${message}`)
     return { ok: false, note_id: row.id, title: row.title, error: message }
   }
-}
-
-async function runDistillModel(
-  ai: NonNullable<Env['AI']>,
-  system: string,
-  user: string,
-): Promise<string | null> {
-  const messages = [
-    { role: 'system', content: system },
-    { role: 'user', content: user },
-  ]
-  for (const model of DISTILL_MODEL_CHAIN) {
-    try {
-      const res = (await ai.run(model, {
-        messages,
-        max_tokens: DISTILL_MAX_OUTPUT_TOKENS,
-        temperature: 0.2,
-      })) as { response?: string }
-      const text = res?.response?.trim() ?? ''
-      if (text.length > 20) return text
-      console.warn(`[distill] ${model} returned empty response`)
-    } catch (error) {
-      console.warn(`[distill] ${model} failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-  return null
 }
 
 function extractDistillBody(content: string): string {

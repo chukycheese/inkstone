@@ -18,6 +18,7 @@ import { transferRoutes } from './routes/transfer'
 import { updateRoutes } from './routes/update'
 import { captureRoutes } from './routes/capture'
 import { distillRoutes } from './routes/distill'
+import { queryRoutes } from './routes/query'
 import { mcpAuthorizeRoutes } from './routes/mcp-authorize'
 import { mcpSettingsRoutes } from './routes/mcp-settings'
 import type { AppBindings } from './env'
@@ -101,6 +102,7 @@ export function createApp() {
   app.route('/api/mcp', mcpSettingsRoutes)
   app.route('/api/capture', captureRoutes)
   app.route('/api/distill', distillRoutes)
+  app.route('/api/query', queryRoutes)
   app.route('/api/share', shareManageRoutes)
   app.route('/api/public', shareRoutes)
   app.route('/api', transferRoutes)
