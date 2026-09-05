@@ -18,6 +18,33 @@ const QUERY_MAX_LIMIT = 10
 const QUERY_SOURCE_CHARS = 4000
 const QUERY_SOURCE_LOOKUP = 3 // top-N per index for the RRF merge
 
+// Korean/English words that carry no retrieval signal. Both the lexical and
+// semantic searches AND their terms together, so a bare question word like
+// "뭐고" in "CUPED가 뭐고 언제 쓰나" would otherwise sink real keywords.
+const QUERY_STOPWORDS = new Set([
+  '뭐', '뭐고', '뭐가', '뭐야', '뭔', '뭘', '뭔지', '무엇', '무엇을', '무엇이', '무엇인지', '무엇일까',
+  '언제', '어디', '어디서', '어떻게', '어떤', '왜', '누가', '누구', '무슨', '무슨', '얼마나', '몇',
+  '쓰는', '쓰는거야', '쓰이는', '쓰이나', '쓰나', '쓰면', '쓰고', '사용하는', '사용하나', '한다',
+  '인지', '이지', '일지', '가', '이', '은', '는', '을', '를', '의', '에', '에게', '에서', '로', '으로',
+  '와', '과', '도', '만', '처럼', '대로', '하고', '라고', '도와줘', '설명해줘', '알려줘', '알려주세요',
+  '해줘', '해주세요', '좀', 'the', 'a', 'an', 'of', 'to', 'in', 'for', 'on', 'with', 'and', 'or',
+  'is', 'are', 'do', 'does', 'did', 'what', 'which', 'why', 'when', 'where', 'how', 'who',
+])
+
+function buildRetrievalQuery(question: string): string {
+  const tokens: string[] = []
+  for (const raw of question.split(/\s+/)) {
+    let token = raw.replace(/[^A-Za-z0-9가-힣]+/g, '')
+    // Strip a trailing Hangul particle/suffix from latin tokens ("adjustment이" -> "adjustment").
+    const latin = token.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)[가-힣]+$/)
+    if (latin) token = latin[1]!
+    if (!token || QUERY_STOPWORDS.has(token.toLowerCase())) continue
+    tokens.push(token)
+  }
+  const cleaned = tokens.slice(0, 4).join(' ')
+  return cleaned || question
+}
+
 interface SourceItem {
   id: string
   title: string
@@ -57,10 +84,11 @@ queryRoutes.post('/', async (c) => {
 
   // Retrieve: merge lexical (FTS/LIKE) and AI semantic candidates by RRF so a
   // note ranking well in both indexes surfaces above single-index hits.
+  const retrievalQuery = buildRetrievalQuery(question)
   const { ftsEnabled } = c.get('database')
   const [lexical, semantic] = await Promise.all([
-    searchUserNotes(db, userId, question, limit * QUERY_SOURCE_LOOKUP, ftsEnabled, false),
-    searchSemanticNotes(c.env, db, userId, question, {}),
+    searchUserNotes(db, userId, retrievalQuery, limit * QUERY_SOURCE_LOOKUP, ftsEnabled, false),
+    searchSemanticNotes(c.env, db, userId, retrievalQuery, {}),
   ])
   const lexicalItems: SourceItem[] = lexical.results.map((hit) => ({
     id: hit.note.id,
