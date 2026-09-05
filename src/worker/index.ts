@@ -5,6 +5,7 @@ import { initializeDatabase } from './db/schema'
 import { drainAllFtsQueues } from './db/fts'
 import { drainAiIndexQueue } from './mcp/ai-search'
 import { drainDistillQueue } from './routes/distill'
+import { runWikiLint } from './routes/lint'
 import { createOAuthProvider, providerForScheduled } from './mcp/oauth'
 import { purgeRevokedMcpApiKeys } from './mcp/api-keys'
 import { purgeExpiredMcpOperations } from './mcp/operations'
@@ -43,6 +44,7 @@ export default {
         providerForScheduled(env).purgeExpiredData(env, { batchSize: 100 }),
         drainAiIndexQueue(env, 300),
         drainDistillQueue(env, ctx, 3),
+        runWikiLint(env, ctx),
         drainAllFtsQueues(env.DB),
       ])
     })())
