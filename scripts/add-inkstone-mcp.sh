@@ -8,19 +8,19 @@
 #      `Authorization: Bearer ink_...` 헤더를 등록한다.
 #
 # 환경 변수:
-#   INKSTONE_MCP_URL      MCP 엔드포인트 (기본: https://your-host.example/mcp)
+#   INKSTONE_MCP_URL      MCP 엔드포인트 (기본: https://inkstone.inkstone.workers.dev/mcp)
 #   INKSTONE_MCP_API_KEY  ink_... 정적 API 키 (설정 시 키 방식으로 등록)
 set -euo pipefail
 
 NAME="inkstone"
-URL="${INKSTONE_MCP_URL:-https://your-host.example/mcp}"
+URL="${INKSTONE_MCP_URL:-https://inkstone.inkstone.workers.dev/mcp}"
 KEY="${INKSTONE_MCP_API_KEY:-}"
 
 echo "=== Inkstone MCP 등록 ==="
 echo "Endpoint: $URL"
 
 if [[ -z "$KEY" ]]; then
-  if [[ "$URL" == "https://your-host.example/mcp" ]]; then
+  if [[ "$URL" == "https://inkstone.inkstone.workers.dev/mcp" ]]; then
     echo "기본 URL을 그대로 쓰지 않도록 INKSTONE_MCP_URL(또는 INKSTONE_MCP_API_KEY)을 설정하세요." >&2
     exit 1
   fi

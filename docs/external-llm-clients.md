@@ -10,7 +10,7 @@ Claude Desktop, Cursor, Gemini CLI, Codex CLI, ChatGPT 커넥터, 범용 MCP SDK
 ## 0. 모바일 앱에서 위키 연결하기
 
 Claude 모바일, ChatGPT, Gemini 모두 **"웹에서 서버를 한 번 등록하면 모바일에서
-바로 쓴다"**는 구조다. 등록하는 URL은 전부 동일하다: `https://wiki.example.com/mcp`
+바로 쓴다"**는 구조다. 등록하는 URL은 전부 동일하다: `https://inkstone.inkstone.workers.dev/mcp`
 
 | 앱 | 모바일 동작 | 서버 등록 위치 | 인증 | 주요 제약 |
 | --- | --- | --- | --- | --- |
@@ -32,7 +32,7 @@ Manage Connectors에서 대화별로 켜고 끈다.
 1. claude.ai 웹에 로그인 → **Settings → Connectors → Add Custom Connector**.
    (Free/Pro/Max는 `Customize → Connectors`, Team/Enterprise는 소유자가
    `Organization settings → Connectors`에서 추가 — 멤버는 이후 개별 연결)
-2. 서버 URL에 `https://wiki.example.com/mcp` 입력.
+2. 서버 URL에 `https://inkstone.inkstone.workers.dev/mcp` 입력.
    Advanced settings 는 비워도 된다 — 이 서버는 DCR(`/oauth/register`)로 공개
    클라이언트를 자동 등록하므로 별도 Client ID/Secret이 필요 없다
    (`oauth.ts:83,112-135`). (참고: 요청 헤더 인증도 서버측으로는 지원되지만, Claude
@@ -55,7 +55,7 @@ Team/Enterprise/Edu; OpenAI는 현재 웹을 중심으로 Business/Enterprise/Ed
 1. 웹 설정에서 **Developer mode**를 켠다 — 경로: `Settings → Security and login →
    Developer mode`. (2026-07 개편으로 "Connectors"는 "Plugins"로 개명됨. 개편 이전
    UI에서는 `Settings → Apps & Connectors → Advanced Settings → Developer Mode`였다.)
-2. **Plugins** 탭으로 이동 → "+" → MCP 서버 URL에 `https://wiki.example.com/mcp` 입력.
+2. **Plugins** 탭으로 이동 → "+" → MCP 서버 URL에 `https://inkstone.inkstone.workers.dev/mcp` 입력.
 3. 인증은 둘 중 하나:
    - **OAuth**: 서버가 DCR을 지원하므로 URL만 넣고 표준 인가 흐름을 따른다.
    - **Token**: 설정 → MCP에서 `ink_...` 정적 키를 생성하고($4) Token 필드에 붙여넣기
@@ -72,7 +72,7 @@ Gemini 소비자 앱의 커스텀 MCP는 스파크 프로그램("Custom apps for
 
 1. gemini.google.com → **Settings & help → Connected Apps → Custom apps for Spark** →
    **Add a custom app**.
-2. MCP 서버 URL에 `https://wiki.example.com/mcp`를 입력.
+2. MCP 서버 URL에 `https://inkstone.inkstone.workers.dev/mcp`를 입력.
 3. 인증: **Advanced features → Dynamic Client Registration**을 켜면 이 서버의
    `/oauth/register`(`oauth.ts:83`)가 자동으로 클라이언트를 등록해 준다. (서버가 DCR을
    지원하지 않는다면 "Show more"로 자격 증명을 직접 입력하는 방식인데, Inkstone은
@@ -93,13 +93,13 @@ Gemini 소비자 앱의 커스텀 MCP는 스파크 프로그램("Custom apps for
 
 | 항목 | URL (예: `https://wiki.example.com`) | 출처 |
 | --- | --- | --- |
-| MCP 엔드포인트 (Streamable HTTP + SSE) | `https://wiki.example.com/mcp` | `oauth.ts:39,74` |
-| OAuth 서버 메타데이터 (RFC 8414) | `https://wiki.example.com/.well-known/oauth-authorization-server` | `index.ts:23` |
-| 보호 리소스 메타데이터 (RFC 9728) | `https://wiki.example.com/.well-known/oauth-protected-resource/mcp` | `oauth-provider.js` (패키지) |
-| 인가 엔드포인트 + 로그인/동의 페이지 | `https://wiki.example.com/authorize` | `oauth.ts:81` |
-| 토큰 + 리보크 엔드포인트 | `https://wiki.example.com/oauth/token` | `oauth.ts:82` |
-| 동적 클라이언트 등록 (RFC 7591) | `https://wiki.example.com/oauth/register` | `oauth.ts:83` |
-| MCP 설정 UI (로그인 후) | `https://wiki.example.com` → 설정 → MCP | `app.ts:103`, `McpSettings.tsx` |
+| MCP 엔드포인트 (Streamable HTTP + SSE) | `https://inkstone.inkstone.workers.dev/mcp` | `oauth.ts:39,74` |
+| OAuth 서버 메타데이터 (RFC 8414) | `https://inkstone.inkstone.workers.dev/.well-known/oauth-authorization-server` | `index.ts:23` |
+| 보호 리소스 메타데이터 (RFC 9728) | `https://inkstone.inkstone.workers.dev/.well-known/oauth-protected-resource/mcp` | `oauth-provider.js` (패키지) |
+| 인가 엔드포인트 + 로그인/동의 페이지 | `https://inkstone.inkstone.workers.dev/authorize` | `oauth.ts:81` |
+| 토큰 + 리보크 엔드포인트 | `https://inkstone.inkstone.workers.dev/oauth/token` | `oauth.ts:82` |
+| 동적 클라이언트 등록 (RFC 7591) | `https://inkstone.inkstone.workers.dev/oauth/register` | `oauth.ts:83` |
+| MCP 설정 UI (로그인 후) | `https://inkstone.inkstone.workers.dev` → 설정 → MCP | `app.ts:103`, `McpSettings.tsx` |
 
 - 인가 서버 `<code>issuer</code>`는 토큰 엔드포인트의 오리진(웹사이트 루트)이다.
 - MCP 핸들러는 `route: '/mcp'` + `legacy: 'stateless'` + `responseMode: 'auto'`로
@@ -179,7 +179,7 @@ Gemini 소비자 앱의 커스텀 MCP는 스파크 프로그램("Custom apps for
 ## 3. 범용 클라이언트 연결 (OAuth PKCE 흐름)
 
 대부분의 최신 클라이언트(Claude·Cursor·Gemini CLI·Codex·opencode)는 아래를 자동으로
-수행하므로 **URL 하나만 넣으면 된다**: `https://wiki.example.com/mcp`
+수행하므로 **URL 하나만 넣으면 된다**: `https://inkstone.inkstone.workers.dev/mcp`
 
 1. 클라이언트가 `/mcp`를 POST하면 401 + `WWW-Authenticate` 챌린지를 받는다.
 2. 챌린지의 `resource_metadata` URL(`/.well-known/oauth-protected-resource/mcp`)을
@@ -208,7 +208,7 @@ OAuth를 돌리기 어려운 스크립트·SDK·테스트용 요청은 키 하�
    (`api-keys.ts:64-65`). 계정당 최대 50개 (`api-keys.ts:16,69-71`).
 3. 연결:
    ```bash
-   curl -X POST "https://wiki.example.com/mcp" \
+   curl -X POST "https://inkstone.inkstone.workers.dev/mcp" \
      -H "Authorization: Bearer ink_..." \
      -H "Content-Type: application/json" \
      -H "Accept: application/json, text/event-stream" \
@@ -224,10 +224,10 @@ OAuth를 돌리기 어려운 스크립트·SDK·테스트용 요청은 키 하�
 
 ```bash
 # (1) OAuth — URL만 등록. 첫 사용 시 브라우저로 자동 인가.
-opencode mcp add inkstone --url "https://wiki.example.com/mcp"
+opencode mcp add inkstone --url "https://inkstone.inkstone.workers.dev/mcp"
 
 # (2) 정적 API 키 — oauth 자동 감지를 끄고 헤더로 인증.
-opencode mcp add inkstone --url "https://wiki.example.com/mcp" \
+opencode mcp add inkstone --url "https://inkstone.inkstone.workers.dev/mcp" \
   --header "Authorization=Bearer ink_..."
 ```
 
@@ -248,7 +248,7 @@ Claude는 `/mcp`에서 401 챌린지 → 보호 리소스 메타데이터 → OA
   "mcpServers": {
     "inkstone": {
       "type": "http",
-      "url": "https://wiki.example.com/mcp",
+      "url": "https://inkstone.inkstone.workers.dev/mcp",
       "oauth": {
         "scopes": ["notes:read", "notes:write"]
       }
@@ -272,7 +272,7 @@ Inkstone은 인가 서버 메타데이터를 **이 플래그를 뺀 채** 제공
 계속 붙으므로 표준 준수 클라이언트에는 영향이 없다.
 
 ```bash
-codex mcp add inkstone --url "https://wiki.example.com/mcp"
+codex mcp add inkstone --url "https://inkstone.inkstone.workers.dev/mcp"
 ```
 
 연결 시 Codex가 브라우저를 열고 로그인·동의를 진행한다.
