@@ -112,5 +112,8 @@
   - Inbox `00` 17건 아카이브 `ok`, 전체 `dry-run` 0건, 최근 lint 368노트 기준 정리
 
 ## 8) Inbox distilled 정리 (남은 건)
-- 상태: **In Progress** — `00 Inbox`에 남아 있는 기존 distilled 문서들 아카이브
-- 다음: `00 Inbox` 내 `status: distilled` & `archived: false` 일괄 아카이브
+- 상태: **Done** — `00 Inbox` distill 완료 14건 추가 아카이브
+- 작업:
+  - `00 Inbox` 내 `status: distilled` & `archived: false` 14건 일괄 아카이브 (`rev 2→3` 6건, `rev 4→5` 8건)
+  - 대상: freecodecamp/oreilly/mattpaige/팟캐스트 4건/seattledataguy/openai/lint 리포트/scientificdiscovery/datadog/sundayletters 등
+- 검증: 14건 모두 `ok`, Inbox 잔여는 `rev 1` EDR 등 미처리 5건 정도
