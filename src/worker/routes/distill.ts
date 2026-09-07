@@ -14,6 +14,7 @@ import { resolveCaptureUserId } from './capture'
 export const distillRoutes = new Hono<AppBindings>()
 
 const DISTILL_MARKER = '> status: distilled'
+const REFRESH_MARKER = '> refresh: v3'
 const DISTILL_SOURCE_MARKER = 'Markdown Content:'
 const DISTILL_BODY_CHARS = 12000
 const DISTILL_MIN_BODY_CHARS = 400
@@ -51,6 +52,7 @@ distillRoutes.post('/', async (c) => {
     limit?: number
     folder_id?: string | null
     dry_run?: boolean
+    refresh?: boolean
   }>(c, JSON_BODY_LIMITS.note)
 
   const { ftsEnabled } = c.get('database')
@@ -67,9 +69,9 @@ distillRoutes.post('/', async (c) => {
       `SELECT id, title, content, rev FROM notes WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL`,
     ).bind(body.note_id, userId).first<DistillCandidateRow>()
     if (!row) throw ApiError.notFound('Note not found')
-    const gate = gateCandidate(row)
+    const gate = gateCandidate(row, body.refresh)
     if (gate) throw ApiError.badRequest(gate)
-    const result = await distillOne(writer, row)
+    const result = await distillOne(writer, row, body.refresh)
     return c.json({ ok: result.ok, processed: result.ok ? 1 : 0, results: [result] })
   }
 
@@ -79,7 +81,7 @@ distillRoutes.post('/', async (c) => {
   let processed = 0
   for (const row of rows) {
     if (processed >= limit) break
-    const result = await distillOne(writer, row)
+    const result = await distillOne(writer, row, body.refresh)
     results.push(result)
     if (result.ok) processed++
   }
@@ -150,22 +152,35 @@ async function drainUserDistills(context: McpWriteContext, max: number): Promise
 async function selectDistillRows(
   db: D1Database,
   userId: string,
-  opts: { limit?: number; folder_id?: string | null },
+  opts: { limit?: number; folder_id?: string | null; refresh?: boolean },
 ): Promise<DistillCandidateRow[]> {
   const limit = Math.min(50, Math.max(1, Math.trunc(opts.limit ?? 10)))
-  const base = `SELECT id, title, content, rev FROM notes
-    WHERE user_id = ?1 AND deleted_at IS NULL
-      AND length(content) > 800 AND instr(content, ?2) = 0
-      AND instr(content, ?4) > 0`
-  const { results } =
-    opts.folder_id != null
-      ? await db.prepare(`${base} AND folder_id = ?5 ORDER BY created_at ASC LIMIT ?3`)
-        .bind(userId, DISTILL_MARKER, limit * 3, DISTILL_SOURCE_MARKER, opts.folder_id).all<DistillCandidateRow>()
-      : await db.prepare(`${base} ORDER BY created_at ASC LIMIT ?3`)
-        .bind(userId, DISTILL_MARKER, limit * 3, DISTILL_SOURCE_MARKER).all<DistillCandidateRow>()
+  const where = [
+    'user_id = ?1',
+    'deleted_at IS NULL',
+    'length(content) > 800',
+    'instr(content, ?4) > 0',
+  ]
+  const binds: Array<string | number> = [userId, DISTILL_MARKER, limit * 3, DISTILL_SOURCE_MARKER]
+  if (opts.refresh) {
+    // Refresh targets already-distilled notes that have not been refreshed yet.
+    where.push('instr(content, ?5) > 0', 'instr(content, ?6) = 0')
+    binds.push(DISTILL_MARKER, REFRESH_MARKER)
+  } else {
+    where.push('instr(content, ?5) = 0')
+    binds.push(DISTILL_MARKER)
+  }
+  if (opts.folder_id != null) {
+    where.push(`folder_id = ?${binds.length + 1}`)
+    binds.push(opts.folder_id)
+  }
+  binds.push(limit * 3)
+  const sql = `SELECT id, title, content, rev FROM notes
+    WHERE ${where.join(' AND ')} ORDER BY created_at ASC LIMIT ?${binds.length}`
+  const { results } = await db.prepare(sql).bind(...binds).all<DistillCandidateRow>()
   const out: DistillCandidateRow[] = []
   for (const row of results) {
-    if (gateCandidate(row)) continue
+    if (gateCandidate(row, opts.refresh)) continue
     out.push(row)
     if (out.length >= limit) break
   }
@@ -191,10 +206,10 @@ async function selectDistillCandidates(
 }
 
 // Returns a human-readable reason when a note must NOT be distilled, else null.
-function gateCandidate(row: DistillCandidateRow): string | null {
+function gateCandidate(row: DistillCandidateRow, refresh = false): string | null {
   const content = row.content ?? ''
   if (content.length <= 800) return 'note content is too short to distill'
-  if (content.includes(DISTILL_MARKER)) return 'note is already distilled'
+  if (content.includes(DISTILL_MARKER)) return refresh ? null : 'note is already distilled'
   if (!content.includes(DISTILL_SOURCE_MARKER)) return 'note is not a raw capture (no Markdown Content source)'
   const body = extractDistillBody(content)
   if (body.length < DISTILL_MIN_BODY_CHARS) return 'captured body is too short to distill'
@@ -205,8 +220,9 @@ function gateCandidate(row: DistillCandidateRow): string | null {
 async function distillOne(
   context: McpWriteContext,
   row: DistillCandidateRow,
+  refresh = false,
 ): Promise<DistillResult> {
-  const gate = gateCandidate(row)
+  const gate = gateCandidate(row, refresh)
   if (gate) return { ok: false, note_id: row.id, title: row.title, reason: gate }
   if (!context.env.AI) return { ok: false, note_id: row.id, title: row.title, error: 'Workers AI is not configured' }
 
@@ -217,8 +233,9 @@ async function distillOne(
     '- Output Markdown only. Never wrap the output in code fences.',
     '- Start with a one-line `> TL;DR:` blockquote that captures the core idea in Korean.',
     '- Then a `## 핵심 요점` section with 4-8 dense bullet points (Korean).',
-    '- Then a `## 태그` section listing a comma-separated `#tag` list on one line.',
+    '- Then a `## 태그` section listing a comma-separated `#tag` list on one line. Tags must be in lowercase English (e.g. #ai, #agents, #semantic-layer); never use Korean or uppercase tags.',
     '- Then a `## 메모` section with 1-3 short sentences on why this matters or how to use it.',
+    '- In the 핵심 요점 or 메모 text, link related concepts using Obsidian-style `[[...]]` wiki links (e.g. `[[semantic layer]]`, `[[LLM-as-a-Judge]]`). Use the canonical English term or the key concept name; link only concepts a reader might search for, 2-5 links max. Do not invent links; only link concepts that genuinely appear in the source.',
     '- Be factual. Do not invent details that are not in the source. Keep it under ~800 Korean characters total.',
   ].join('\n')
   const user = `제목: ${row.title}\n\n본문:\n${body}`
@@ -229,13 +246,16 @@ async function distillOne(
     return { ok: false, note_id: row.id, title: row.title, error: 'all distill models failed' }
   }
 
-  const section = `## Wiki\n\n> status: distilled\n\n${markdown.trim()}\n\n---\n`
+  const hasWikiSection = /^##\s+Wiki\s*$/mi.test(row.content)
+  const sectionBody = `> status: distilled\n${refresh ? '> refresh: v3\n' : ''}\n${markdown.trim()}`
+  const section = `## Wiki\n\n${sectionBody}\n\n---\n`
   try {
     const note = await editMcpNote(context, {
       operationId: newId(),
       noteId: row.id,
       expectedRev: row.rev,
-      operation: 'prepend',
+      operation: hasWikiSection ? 'replace' : 'prepend',
+      oldText: hasWikiSection ? distillOldBlock(row.content) : undefined,
       text: section,
     })
     await enqueueNoteIndex(context.env.DB, context.userId, row.id, 'embed')
@@ -250,6 +270,23 @@ async function distillOne(
 function extractDistillBody(content: string): string {
   const idx = content.indexOf(DISTILL_SOURCE_MARKER)
   return (idx >= 0 ? content.slice(idx + DISTILL_SOURCE_MARKER.length) : content).trim()
+}
+
+/**
+ * Returns the exact text of an existing distilled `## Wiki` block — from the
+ * heading through the `---` separator that precedes the raw capture. Used with
+ * the `replace` operation instead of `replace_section`, which only truncates at
+ * the next same-level heading (`## 핵심 요점`) and would leave stale distill
+ * bodies behind. Returns undefined when no such block exists.
+ */
+function distillOldBlock(content: string): string | undefined {
+  const heading = /^##\s+Wiki\s*$/m.exec(content)
+  if (!heading) return undefined
+  const start = heading.index
+  const rest = content.slice(start)
+  const sepMatch = /^[\t ]*---[\t ]*(?:\r?\n|$)/m.exec(rest)
+  if (!sepMatch) return undefined
+  return rest.slice(0, sepMatch.index + sepMatch[0].length)
 }
 
 const BROKEN_BODY_PATTERNS = [
