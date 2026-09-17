@@ -158,7 +158,7 @@ async function selectDistillRows(
   const where = [
     'user_id = ?1',
     'deleted_at IS NULL',
-    'length(content) > 800',
+    'length(content) > 400',
     'instr(content, ?4) > 0',
   ]
   const binds: Array<string | number> = [userId, DISTILL_MARKER, limit * 3, DISTILL_SOURCE_MARKER]
