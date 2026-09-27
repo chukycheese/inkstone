@@ -1,4 +1,8 @@
 export const EN_US_MESSAGES = {
+    "mobile.account": "Me",
+    "mobile.view": "View",
+    "mobile.menu": "Menu",
+    "mobile.back_to_account": "Back to Me",
     "app.boot_label": "Preparing your notebook…",
     "app.document_title": "Inkstone",
     "app.meta_description": "A private, self-hosted Markdown notebook built on Cloudflare.",
@@ -220,6 +224,7 @@ export const EN_US_MESSAGES = {
     "common.save": "Save",
     "common.save_failed": "Save failed",
     "common.search_notes_or_run_a_command": "Search notes or run a command",
+    "shell.search": "Search",
     "common.settings": "Settings",
     "common.strikethrough": "Strikethrough",
     "common.tabs": "Tabs",
@@ -238,11 +243,9 @@ export const EN_US_MESSAGES = {
     "common.zoom_out": "Zoom out",
     "editor.column_1_column_2_column_3": "| Column 1 | Column 2 | Column 3 |",
     "editor.create_new_note": "Create new note",
-    "editor.definition": "Definition",
     "editor.start_writing": "Start writing…",
     "editor.tab_1": "Tab 1",
     "editor.tab_2": "Tab 2",
-    "editor.term": "Term",
     "editor.upload_failed_value0": "<!-- Upload failed: {value0} -->",
     "editor.uploading_value0": "![Uploading {value0}…]()",
     "feedback.dismiss": "Dismiss",
@@ -294,6 +297,7 @@ export const EN_US_MESSAGES = {
     "graph.reset": "Reset",
     "markdown.abstract": "Abstract",
     "markdown.code": "Code",
+    "markdown.collapse_code": "Collapse code",
     "markdown.code_highlighting_timed_out_while_loading": "Code highlighting timed out while loading",
     "markdown.copy_code": "Copy code",
     "markdown.could_not_load_embedded_content": "Could not load embedded content",
@@ -323,6 +327,7 @@ export const EN_US_MESSAGES = {
     "markdown.redrawing_chart": "Redrawing chart...",
     "markdown.rendering_diagram": "Rendering diagram…",
     "markdown.success": "Success",
+    "markdown.show_more_code": "Show {count} more lines",
     "markdown.tasks_in_embedded_notes_are_read_only": "Tasks in embedded notes are read-only",
     "markdown.the_front_matter_root_must_be_a_yaml_mapping": "The Front Matter root must be a YAML mapping",
     "markdown.the_tasks_in_the_example_are_read_only": "The tasks in the example are read-only",
@@ -346,6 +351,9 @@ export const EN_US_MESSAGES = {
     "notes.comfortable_list": "Comfortable list",
     "notes.compact_list": "Compact list",
     "notes.content_conflict": "Content conflict",
+    "notes.copy_id": "Copy ID",
+    "notes.copy_direct_link": "Copy direct link",
+    "notes.copy_title": "Copy title",
     "notes.could_not_create_note": "Could not create note",
     "notes.could_not_update_the_offline_queue_state": "Could not update the offline queue state",
     "notes.create_a_copy": "Create a copy",
@@ -354,6 +362,7 @@ export const EN_US_MESSAGES = {
     "notes.delete_permanently": "Delete permanently",
     "notes.deleted": "Deleted",
     "notes.deleted_notes_remain_until_you_restore_or_clear_them": "Deleted notes remain until you restore or clear them",
+    "notes.direct_link_copied": "Direct link copied",
     "notes.deletion_was_canceled_because_the_note_body_is_not_safely_synced": "Deletion was canceled because the note body is not safely synced",
     "notes.deselect": "Deselect",
     "notes.drag_notes_in_or_create_new_ones_here": "Drag notes in, or create new ones here",
@@ -365,6 +374,7 @@ export const EN_US_MESSAGES = {
     "notes.failed_to_open_note": "Failed to open note",
     "notes.filter_in_this_view": "Filter in this view…",
     "notes.full_sync_pagination_data_is_incomplete": "Full-sync pagination data is incomplete",
+    "notes.id_copied": "ID copied",
     "notes.sync_pagination_data_is_incomplete": "Sync pagination data is incomplete",
     "notes.keep_notes_here_when_you_want_them_out_of_the_way_but_not_deleted": "Keep notes here when you want them out of the way but not deleted",
     "notes.keep_this_page_open_and_reconnect_as_soon_as_possible_closing_it_may_mak": "Keep this page open and reconnect as soon as possible. Closing it may make these changes unrecoverable.",
@@ -416,6 +426,7 @@ export const EN_US_MESSAGES = {
     "notes.this_note_no_longer_exists": "This note no longer exists",
     "notes.this_operation_cannot_be_undone": "This operation cannot be undone.",
     "notes.title": "Title",
+    "notes.title_copied": "Title copied",
     "notes.trash_is_empty": "Trash is empty",
     "notes.try_another_search_or_press_shortcut_to_search_everywhere": "Try another search, or press {shortcut} to search everywhere",
     "notes.unpin": "Unpin",
@@ -778,6 +789,10 @@ export const EN_US_MESSAGES = {
     "settings.s3_compatible_object_storage_with_5_gb_free_and_no_credit_card_required": "S3-compatible object storage with 5 GB free and no credit card required.",
     "settings.scheduled": "Scheduled",
     "settings.scroll_sync": "Scroll sync",
+    "settings.collapse_long_code_blocks": "Collapse long code blocks",
+    "settings.collapse_long_code_blocks_description": "Show a compact preview and let readers expand code when needed",
+    "settings.code_block_collapse_after": "Collapse after",
+    "settings.lines": " lines",
     "settings.sec": " sec",
     "settings.select_file": "Select file",
     "settings.select_backup_folder": "Select backup folder",
@@ -880,9 +895,11 @@ export const EN_US_MESSAGES = {
     "share.1_day": "1 day",
     "share.30_days": "30 days",
     "share.7_days": "7 days",
+    "share.active": "Active",
     "share.anyone_who_gets_the_link_will_immediately_lose_access": "Anyone who gets the link will immediately lose access.",
     "share.ask_the_person_who_shared_this_note_for_its_passcode": "Ask the person who shared this note for its passcode",
     "share.content_unavailable": "Content unavailable",
+    "share.could_not_load_list": "Could not load shared notes",
     "share.done": "Done",
     "share.embedded_private_notes_are_not_included_in_public_shares": "Embedded private notes are not included in public shares",
     "share.expiration": "Expiration",
@@ -890,15 +907,19 @@ export const EN_US_MESSAGES = {
     "share.expires_value0": "Expires {value0}",
     "share.generate_public_link": "Generate public link",
     "share.incorrect_passcode": "Incorrect passcode",
+    "share.in_trash": "In trash",
     "share.enter_a_passcode": "Enter a passcode first",
     "share.passcode_too_short": "The passcode must be at least 4 characters",
     "share.keep_current_expiration": "Keep current",
     "share.leave_blank_to_keep_the_current_passcode": "Leave blank to keep the current passcode",
     "share.link_revoked": "Link revoked",
     "share.loading_share_status": "Loading share status…",
+    "share.manage": "Manage",
     "share.could_not_load_sharing_status": "Could not load sharing status",
     "share.never_expires": "Never expires",
     "share.never_expires_71ab34": "Never expires",
+    "share.no_matching_shares": "No matching shares",
+    "share.no_shared_notes": "No shared notes yet",
     "share.open_link": "Open link",
     "share.opening": "Opening…",
     "share.passcode": "Passcode",
@@ -906,14 +927,19 @@ export const EN_US_MESSAGES = {
     "share.public_link": "Public link",
     "share.public_link_created": "Public link created",
     "share.public_links_are_read_only_visitors_can_see_only_the_latest_version_of_t": "Public links are read-only. Visitors can view only the latest content of this note and cannot access other notes.",
+    "share.refresh_list": "Refresh shared notes",
     "share.require_a_passcode_to_view_this_note": "Require a passcode to view this note",
     "share.revoke_link": "Revoke link",
     "share.revoke_this_public_link": "Revoke this public link?",
     "share.set_a_passcode": "Set a passcode",
+    "share.search_shared_notes": "Search shared notes or links",
     "share.share_note": "Share note",
+    "share.shared_notes": "Shared notes",
+    "share.shared_notes_description": "View and manage every public link you created.",
     "share.shared_via_site": "Shared via {site}",
     "share.sharing_settings_updated": "Sharing settings updated",
     "share.switch_theme": "Switch theme",
+    "share.source_note_unavailable": "The source note is unavailable",
     "share.tasks_in_public_shares_are_read_only": "Tasks in public shares are read-only",
     "share.this_note_requires_a_password": "This note requires a password",
     "share.unchanged": "•••••• (unchanged)",
@@ -922,7 +948,7 @@ export const EN_US_MESSAGES = {
     "share.visits": " visits",
     "shell.add_to_remove_from_favorites": "Add to / remove from favorites",
     "shell.collapse_expand_list": "Collapse/expand list",
-    "shell.cycle_editor_split_preview": "Cycle editor / split / preview",
+    "shell.cycle_editor_split_preview": "Cycle live preview / split view / reading mode",
     "shell.global": "Global",
     "shell.keyboard_shortcuts": "Keyboard shortcuts",
     "shell.mobile_navigation": "Mobile navigation",
@@ -1003,7 +1029,10 @@ export const EN_US_MESSAGES = {
     "time.this_week": "This week",
     "time.today": "Today",
     "time.yesterday": "Yesterday",
-    "workspace.a_snapshot_is_saved_every_few_minutes_or_after_larger_edits": "A snapshot is saved every few minutes or after larger edits",
+      "workspace.reading_mode": "Reading mode",
+  "workspace.live_preview": "Live preview",
+  "workspace.live_preview_hint": "Click to edit; move the cursor away to render. Ctrl / ⌘ + click to open links",
+  "workspace.a_snapshot_is_saved_every_few_minutes_or_after_larger_edits": "A snapshot is saved every few minutes or after larger edits",
     "workspace.autosave_for_value0": "Autosave for “{value0}”",
     "workspace.back_to_notes": "Back to notes",
     "workspace.block_id": "Block ID",
@@ -1013,7 +1042,6 @@ export const EN_US_MESSAGES = {
     "workspace.close_right_note": "Close right note",
     "workspace.choose_a_note_or_write_a_new_one": "Choose a note, or write a new one",
     "workspace.code_block": "Code block",
-    "workspace.definition_list": "Definition list",
     "workspace.details_block": "Details block",
     "workspace.differences_from_current_content": "Differences from current content",
     "workspace.divider": "Divider",
@@ -1029,7 +1057,6 @@ export const EN_US_MESSAGES = {
     "workspace.inline_math": "Inline math",
     "workspace.insert_image": "Insert image",
     "workspace.insert_tag": "Insert tag",
-    "workspace.inserted_text": "Inserted text",
     "workspace.large_content_using_a_faster_comparison": "Large content · using a faster comparison",
     "workspace.latest": "Latest",
     "workspace.layout": "Layout",
@@ -1049,7 +1076,6 @@ export const EN_US_MESSAGES = {
     "workspace.note_embed": "Note embed",
     "workspace.note_syntax": "Note syntax",
     "workspace.open_a_note_from_the_list_or_press_shortcut_to_create_one": "Open a note from the list, or press {shortcut} to create one",
-    "workspace.pandoc_attributes": "Pandoc attributes",
     "workspace.preview_only": "Preview only",
     "workspace.remote_image": "Remote image",
     "workspace.resize_editor_and_preview_panes": "Resize editor and preview panes",
@@ -1059,8 +1085,6 @@ export const EN_US_MESSAGES = {
     "workspace.restored_to_selected_version": "Restored to selected version",
     "workspace.share": "Share",
     "workspace.split_view": "Split view",
-    "workspace.subscript": "Subscript",
-    "workspace.superscript": "Superscript",
     "workspace.table": "Table",
     "workspace.the_current_content_will_be_automatically_saved_as_a_new_version_first_a": "The current content will be automatically saved as a new version first and will not be lost.",
     "workspace.title": "[[title]]",
@@ -1085,11 +1109,11 @@ aliases:
 > - The title at the top of a note is independently editable and does not have to match the first body line.
 > - MCP is entirely optional and requires account authorization before it can read notes.
 
-Use the left side to organize notes, the center to edit plain Markdown, and the right side for live preview. There is no proprietary document format: every \`.md\` file in a backup opens in any text editor.
+Organize notes on the left. Choose live preview to edit content in place, split view for source and preview side by side on desktop and stacked on mobile, or reading mode to browse the rendered document. There is no proprietary document format: every \`.md\` file in a backup opens in any text editor.
 
 ## Try these now
 
-- [ ] Click this checkbox and watch the source update on the left
+- [ ] Click this checkbox and see its state saved
   - [ ] Nested tasks update their exact source line too
 - [ ] Select text and press \`Ctrl + B\` to make it bold
 - [ ] Press \`Ctrl + K\` to open the command palette
@@ -1167,10 +1191,7 @@ Under each example title, the **rendered result** is on the left and the **copya
 | *Italic* | \`*Italic*\` |
 | ~~Strikethrough~~ | \`~~Strikethrough~~\` |
 | ==Highlight== | \`==Highlight==\` |
-| ++Inserted text++ | \`++Inserted text++\` |
 | \`Inline code\` | \`\` \`Inline code\` \`\` |
-| H~2~O | \`H~2~O\` |
-| x^2^ | \`x^2^\` |
 
 ### Links, images, and note relationships
 
@@ -1189,13 +1210,13 @@ Under each example title, the **rendered result** is on the left and the **copya
 ~~~~md-example title="Block ID and reference"
 This content can be addressed precisely. ^markdown-demo
 
-Click ((markdown-demo)) to return to it, or use [[#^markdown-demo]].
+Click [[#^markdown-demo]] to return to it.
 ~~~~
 
 ~~~~md-example title="Note embed"
-This content is embedded again below. ^markdown-embed-demo
+This content is embedded again below. ^embed-demo
 
-![[#^markdown-embed-demo]]
+![[#^embed-demo|Embedded result]]
 ~~~~
 
 ~~~~md-example title="Footnote"
@@ -1203,6 +1224,8 @@ This sentence has an additional note.[^markdown-footnote]
 
 [^markdown-footnote]: This is the rendered footnote. Use its links to move between the reference and definition.
 ~~~~
+
+Obsidian comments are hidden in preview: \`%% one line %%\`, or place \`%%\` markers around multiple lines.
 
 ### Math and diagrams
 
@@ -1221,17 +1244,20 @@ flowchart LR
 \`\`\`
 ~~~~
 
-~~~~md-example title="Pandoc attributes"
-##### Heading with a custom ID {#markdown-custom-heading .wide}
-
-[Jump to the custom heading](#markdown-custom-heading)
-~~~~
-
 ### Modern block extensions
 
 ~~~~md-example title="Obsidian callout"
-> [!NOTE] Rendered callout
+> [!NOTE]- Folded callout with a custom title
 > Put explanations, tasks, lists, or other Markdown here.
+>
+> > [!TIP]+ Expanded nested callout
+> > Nested callouts use the same syntax.
+~~~~
+
+~~~~md-example title="Folded details block"
+::: details [Click to expand]
+This content is hidden until the details block is opened.
+:::
 ~~~~
 
 ~~~~md-example title="Tabs"
@@ -1244,18 +1270,6 @@ This is the first tab panel.
 This is the second tab panel.
 :::
 ::::
-~~~~
-
-~~~~md-example title="Folded content"
-::: details [Open the Markdown details block]
-This is the actual folded content.
-:::
-
-<details>
-<summary>Open the native details block</summary>
-
-Markdown can continue inside it.
-</details>
 ~~~~
 
 ~~~~md-example title="Code block with a title, line numbers, and highlighting"

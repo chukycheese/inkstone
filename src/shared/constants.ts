@@ -81,11 +81,13 @@ export const DEFAULT_SETTINGS: UserSettings = {
     autoSaveDelay: 500,
   },
   preview: {
-    layout: 'split',
+    layout: 'live',
     syncScroll: true,
     showToc: true,
     math: true,
     mermaid: true,
+    codeBlockCollapse: true,
+    codeBlockCollapseLines: 24,
   },
   backup: {
     schedule: 'sixHourly',
@@ -111,7 +113,7 @@ const DENSITIES = ['comfortable', 'compact'] as const
 const PROSE_FONTS = ['sans', 'serif'] as const
 const PROSE_WIDTHS = ['narrow', 'normal', 'wide', 'full'] as const
 const EDITOR_FONTS = ['mono', 'sans'] as const
-const EDITOR_LAYOUTS = ['edit', 'split', 'preview'] as const
+const EDITOR_LAYOUTS = ['live', 'split', 'preview'] as const
 const BACKUP_SCHEDULES = ['off', 'hourly', 'sixHourly', 'daily'] as const
 
 
@@ -184,6 +186,13 @@ export function mergeSettings(partial: unknown): UserSettings {
   base.preview.showToc = booleanValue(preview.showToc, base.preview.showToc)
   base.preview.math = booleanValue(preview.math, base.preview.math)
   base.preview.mermaid = booleanValue(preview.mermaid, base.preview.mermaid)
+  base.preview.codeBlockCollapse = booleanValue(preview.codeBlockCollapse, base.preview.codeBlockCollapse)
+  base.preview.codeBlockCollapseLines = integerInRange(
+    preview.codeBlockCollapseLines,
+    8,
+    100,
+    base.preview.codeBlockCollapseLines,
+  )
 
   base.backup.schedule = enumValue(
     backup.schedule,

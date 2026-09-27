@@ -1,5 +1,9 @@
 import type { MessageKey } from './en-US';
 export const ZH_CN_MESSAGES = {
+    "mobile.account": "我的",
+    "mobile.view": "查看",
+    "mobile.menu": "菜单",
+    "mobile.back_to_account": "返回我的",
     "app.boot_label": "正在准备笔记本…",
     "app.document_title": "Inkstone",
     "app.meta_description": "运行在 Cloudflare 上的私有、自托管 Markdown 笔记本。",
@@ -221,6 +225,7 @@ export const ZH_CN_MESSAGES = {
     "common.save": "保存",
     "common.save_failed": "保存失败",
     "common.search_notes_or_run_a_command": "搜索笔记、执行命令",
+    "shell.search": "搜索",
     "common.settings": "设置",
     "common.strikethrough": "删除线",
     "common.tabs": "标签页",
@@ -239,11 +244,9 @@ export const ZH_CN_MESSAGES = {
     "common.zoom_out": "缩小",
     "editor.column_1_column_2_column_3": "| 列 1 | 列 2 | 列 3 |",
     "editor.create_new_note": "创建新笔记",
-    "editor.definition": "定义",
     "editor.start_writing": "开始写点什么…",
     "editor.tab_1": "标签 1",
     "editor.tab_2": "标签 2",
-    "editor.term": "术语",
     "editor.upload_failed_value0": "<!-- 上传失败：{value0} -->",
     "editor.uploading_value0": "![上传中 {value0}…]()",
     "feedback.dismiss": "关闭提示",
@@ -295,6 +298,7 @@ export const ZH_CN_MESSAGES = {
     "graph.reset": "复位",
     "markdown.abstract": "摘要",
     "markdown.code": "代码",
+    "markdown.collapse_code": "收起代码",
     "markdown.code_highlighting_timed_out_while_loading": "代码高亮组件加载超时",
     "markdown.copy_code": "复制代码",
     "markdown.could_not_load_embedded_content": "嵌入内容无法加载",
@@ -324,6 +328,7 @@ export const ZH_CN_MESSAGES = {
     "markdown.redrawing_chart": "正在重新绘制图表…",
     "markdown.rendering_diagram": "正在绘制图表…",
     "markdown.success": "成功",
+    "markdown.show_more_code": "显示其余 {count} 行",
     "markdown.tasks_in_embedded_notes_are_read_only": "嵌入笔记中的任务为只读",
     "markdown.the_front_matter_root_must_be_a_yaml_mapping": "Front Matter 顶层必须是 YAML 映射",
     "markdown.the_tasks_in_the_example_are_read_only": "示例中的任务为只读",
@@ -347,6 +352,9 @@ export const ZH_CN_MESSAGES = {
     "notes.comfortable_list": "舒适列表",
     "notes.compact_list": "紧凑列表",
     "notes.content_conflict": "内容有冲突",
+    "notes.copy_id": "复制 ID",
+    "notes.copy_direct_link": "复制直链",
+    "notes.copy_title": "复制标题",
     "notes.could_not_create_note": "新建笔记失败",
     "notes.could_not_update_the_offline_queue_state": "离线队列状态保存失败",
     "notes.create_a_copy": "创建副本",
@@ -355,6 +363,7 @@ export const ZH_CN_MESSAGES = {
     "notes.delete_permanently": "彻底删除",
     "notes.deleted": "已删除",
     "notes.deleted_notes_remain_until_you_restore_or_clear_them": "删除的笔记会保留到你恢复或清空它们",
+    "notes.direct_link_copied": "已复制直链",
     "notes.deletion_was_canceled_because_the_note_body_is_not_safely_synced": "正文尚未安全同步，已取消删除",
     "notes.deselect": "取消选择",
     "notes.drag_notes_in_or_create_new_ones_here": "把笔记拖进来，或在这里新建",
@@ -366,6 +375,7 @@ export const ZH_CN_MESSAGES = {
     "notes.failed_to_open_note": "打开笔记失败",
     "notes.filter_in_this_view": "在此视图中筛选…",
     "notes.full_sync_pagination_data_is_incomplete": "全量同步分页信息不完整",
+    "notes.id_copied": "已复制 ID",
     "notes.sync_pagination_data_is_incomplete": "同步分页信息不完整",
     "notes.keep_notes_here_when_you_want_them_out_of_the_way_but_not_deleted": "暂时不看但又不想删的笔记可以放这里",
     "notes.keep_this_page_open_and_reconnect_as_soon_as_possible_closing_it_may_mak": "请保持页面打开并尽快恢复网络，否则关闭页面后内容可能无法恢复。",
@@ -417,6 +427,7 @@ export const ZH_CN_MESSAGES = {
     "notes.this_note_no_longer_exists": "这篇笔记已不存在",
     "notes.this_operation_cannot_be_undone": "这个操作无法撤销。",
     "notes.title": "按标题",
+    "notes.title_copied": "已复制标题",
     "notes.trash_is_empty": "回收站是空的",
     "notes.try_another_search_or_press_shortcut_to_search_everywhere": "换个词试试，或者用 {shortcut} 全局搜索",
     "notes.unpin": "取消置顶",
@@ -779,6 +790,10 @@ export const ZH_CN_MESSAGES = {
     "settings.s3_compatible_object_storage_with_5_gb_free_and_no_credit_card_required": "兼容 S3 的对象存储。免费容量 5 GB，无需信用卡。",
     "settings.scheduled": "定时",
     "settings.scroll_sync": "滚动同步",
+    "settings.collapse_long_code_blocks": "折叠较长的代码块",
+    "settings.collapse_long_code_blocks_description": "默认仅显示部分代码，需要时可展开阅读全文",
+    "settings.code_block_collapse_after": "超过以下行数后折叠",
+    "settings.lines": " 行",
     "settings.sec": "秒",
     "settings.select_file": "选择文件",
     "settings.select_backup_folder": "选择备份文件夹",
@@ -881,9 +896,11 @@ export const ZH_CN_MESSAGES = {
     "share.1_day": "1 天",
     "share.30_days": "30 天",
     "share.7_days": "7 天",
+    "share.active": "生效中",
     "share.anyone_who_gets_the_link_will_immediately_lose_access": "任何拿到链接的人都会立刻无法访问。",
     "share.ask_the_person_who_shared_this_note_for_its_passcode": "请向分享者索取访问口令",
     "share.content_unavailable": "内容不可用",
+    "share.could_not_load_list": "无法读取分享列表",
     "share.done": "完成",
     "share.embedded_private_notes_are_not_included_in_public_shares": "嵌入内容不会显示在公开分享中",
     "share.expiration": "有效期",
@@ -891,15 +908,19 @@ export const ZH_CN_MESSAGES = {
     "share.expires_value0": "{value0} 过期",
     "share.generate_public_link": "生成公开链接",
     "share.incorrect_passcode": "口令不正确",
+    "share.in_trash": "在回收站",
     "share.enter_a_passcode": "请先输入访问口令",
     "share.passcode_too_short": "访问口令至少需要 4 个字符",
     "share.keep_current_expiration": "保持当前",
     "share.leave_blank_to_keep_the_current_passcode": "留空表示保持原来的口令不变",
     "share.link_revoked": "链接已撤销",
     "share.loading_share_status": "读取分享状态…",
+    "share.manage": "管理",
     "share.could_not_load_sharing_status": "无法读取分享状态",
     "share.never_expires": "永久",
     "share.never_expires_71ab34": "永久有效",
+    "share.no_matching_shares": "没有匹配的分享",
+    "share.no_shared_notes": "还没有分享过笔记",
     "share.open_link": "打开链接",
     "share.opening": "正在打开…",
     "share.passcode": "口令",
@@ -907,14 +928,19 @@ export const ZH_CN_MESSAGES = {
     "share.public_link": "公开链接",
     "share.public_link_created": "公开链接已生成",
     "share.public_links_are_read_only_visitors_can_see_only_the_latest_version_of_t": "公开链接为只读。访问者只能查看这篇笔记的最新内容，无法访问其他笔记。",
+    "share.refresh_list": "刷新分享列表",
     "share.require_a_passcode_to_view_this_note": "开启后需要输入口令才能查看",
     "share.revoke_link": "撤销链接",
     "share.revoke_this_public_link": "撤销这个公开链接？",
     "share.set_a_passcode": "设置一个口令",
+    "share.search_shared_notes": "搜索已分享的笔记或链接",
     "share.share_note": "分享笔记",
+    "share.shared_notes": "分享列表",
+    "share.shared_notes_description": "查看和管理已创建的公开链接。",
     "share.shared_via_site": "由 {site} 分享",
     "share.sharing_settings_updated": "已更新分享设置",
     "share.switch_theme": "切换主题",
+    "share.source_note_unavailable": "原笔记暂时无法打开",
     "share.tasks_in_public_shares_are_read_only": "公开分享中的任务为只读",
     "share.this_note_requires_a_password": "这篇笔记需要口令",
     "share.unchanged": "••••••（不变）",
@@ -923,7 +949,7 @@ export const ZH_CN_MESSAGES = {
     "share.visits": "次访问",
     "shell.add_to_remove_from_favorites": "收藏 / 取消收藏",
     "shell.collapse_expand_list": "折叠 / 展开列表",
-    "shell.cycle_editor_split_preview": "切换编辑 / 分栏 / 预览",
+    "shell.cycle_editor_split_preview": "切换即时渲染 / 分栏 / 阅读",
     "shell.global": "全局",
     "shell.keyboard_shortcuts": "快捷键面板",
     "shell.mobile_navigation": "手机端导航",
@@ -1004,7 +1030,10 @@ export const ZH_CN_MESSAGES = {
     "time.this_week": "本周",
     "time.today": "今天",
     "time.yesterday": "昨天",
-    "workspace.a_snapshot_is_saved_every_few_minutes_or_after_larger_edits": "每隔几分钟或改动较大时，会自动留一份存档",
+      "workspace.reading_mode": "阅读模式",
+  "workspace.live_preview": "即时渲染",
+  "workspace.live_preview_hint": "点击内容编辑，移开光标查看排版；Ctrl / ⌘ + 点击打开链接",
+  "workspace.a_snapshot_is_saved_every_few_minutes_or_after_larger_edits": "每隔几分钟或改动较大时，会自动留一份存档",
     "workspace.autosave_for_value0": "「{value0}」的自动存档",
     "workspace.back_to_notes": "返回笔记列表",
     "workspace.block_id": "块 ID",
@@ -1014,7 +1043,6 @@ export const ZH_CN_MESSAGES = {
     "workspace.close_right_note": "关闭右侧笔记",
     "workspace.choose_a_note_or_write_a_new_one": "选一篇笔记，或者写一篇新的",
     "workspace.code_block": "代码块",
-    "workspace.definition_list": "定义列表",
     "workspace.details_block": "折叠内容",
     "workspace.differences_from_current_content": "与当前内容的差异",
     "workspace.divider": "分隔线",
@@ -1030,7 +1058,6 @@ export const ZH_CN_MESSAGES = {
     "workspace.inline_math": "行内公式",
     "workspace.insert_image": "插入图片",
     "workspace.insert_tag": "插入标签",
-    "workspace.inserted_text": "插入文本",
     "workspace.large_content_using_a_faster_comparison": "内容较大，已使用快速对比",
     "workspace.latest": "最近一次",
     "workspace.layout": "布局",
@@ -1050,7 +1077,6 @@ export const ZH_CN_MESSAGES = {
     "workspace.note_embed": "笔记嵌入",
     "workspace.note_syntax": "笔记语法",
     "workspace.open_a_note_from_the_list_or_press_shortcut_to_create_one": "左侧列表点一下就能打开；按 {shortcut} 新建",
-    "workspace.pandoc_attributes": "Pandoc 属性",
     "workspace.preview_only": "仅预览",
     "workspace.remote_image": "网络图片",
     "workspace.resize_editor_and_preview_panes": "调整编辑与预览宽度",
@@ -1060,8 +1086,6 @@ export const ZH_CN_MESSAGES = {
     "workspace.restored_to_selected_version": "已恢复到所选版本",
     "workspace.share": "分享",
     "workspace.split_view": "分栏",
-    "workspace.subscript": "下标",
-    "workspace.superscript": "上标",
     "workspace.table": "表格",
     "workspace.the_current_content_will_be_automatically_saved_as_a_new_version_first_a": "当前内容会先自动存为一个新版本，不会丢失。",
     "workspace.title": "[[标题]]",
@@ -1086,11 +1110,11 @@ aliases:
 > - 笔记顶部标题可以独立编辑，不必与正文第一行相同。
 > - MCP 完全可选，并且必须经过账号授权才能读取笔记。
 
-左侧管理笔记，中间编辑纯文本 Markdown，右侧实时预览。没有专有文档格式，备份里的 \`.md\` 文件可以被任何文本编辑器打开。
+左侧管理笔记，正文支持即时渲染、分栏和阅读三种方式：即时渲染中点击内容即可编辑，分栏在电脑上左右排列、手机上上下排列，阅读模式专注浏览正文。没有专有文档格式，备份里的 \`.md\` 文件可以被任何文本编辑器打开。
 
 ## 现在就试试
 
-- [ ] 点击这个复选框，确认它会同步改写左侧源码
+- [ ] 点击这个复选框，确认勾选状态会保存
   - [ ] 子任务也能精确勾选，不会改错上一行
 - [ ] 选中文字，按 \`Ctrl + B\` 加粗
 - [ ] 按 \`Ctrl + K\` 打开命令面板
@@ -1168,10 +1192,7 @@ aliases:
 | *斜体* | \`*斜体*\` |
 | ~~删除线~~ | \`~~删除线~~\` |
 | ==高亮== | \`==高亮==\` |
-| ++插入文本++ | \`++插入文本++\` |
 | \`行内代码\` | \`\` \`行内代码\` \`\` |
-| H~2~O | \`H~2~O\` |
-| x^2^ | \`x^2^\` |
 
 ### 链接、图片与笔记关系
 
@@ -1190,13 +1211,13 @@ aliases:
 ~~~~md-example title="块 ID 与块引用"
 这是一段可以被精确定位的内容。 ^markdown-demo
 
-点击 ((markdown-demo)) 可以跳回上面这段；也可以使用 [[#^markdown-demo]]。
+点击 [[#^markdown-demo]] 可以跳回上面这段。
 ~~~~
 
 ~~~~md-example title="笔记嵌入"
-这段内容会在下方被再次嵌入。 ^markdown-embed-demo
+这段内容会在下方被再次嵌入。 ^embed-demo
 
-![[#^markdown-embed-demo]]
+![[#^embed-demo|嵌入结果]]
 ~~~~
 
 ~~~~md-example title="脚注"
@@ -1204,6 +1225,8 @@ aliases:
 
 [^markdown-footnote]: 这是脚注的实际内容；点击编号可以在正文与脚注之间跳转。
 ~~~~
+
+Obsidian 注释不会出现在预览中：\`%% 单行注释 %%\`；多行内容可用单独的 \`%%\` 标记包围。
 
 ### 公式与图表
 
@@ -1222,17 +1245,20 @@ flowchart LR
 \`\`\`
 ~~~~
 
-~~~~md-example title="Pandoc 属性"
-##### 带自定义 ID 的标题 {#markdown-custom-heading .wide}
-
-[跳到上面的自定义标题](#markdown-custom-heading)
-~~~~
-
 ### 现代块级扩展
 
 ~~~~md-example title="Obsidian Callout"
-> [!NOTE] Callout 实际效果
+> [!NOTE]- 默认折叠并使用自定义标题
 > 这里可以放说明、任务、列表或其他 Markdown 内容。
+>
+> > [!TIP]+ 默认展开的嵌套 Callout
+> > 嵌套 Callout 使用相同语法。
+~~~~
+
+~~~~md-example title="折叠内容"
+::: details [点击展开]
+这里的内容会在展开折叠块后显示。
+:::
 ~~~~
 
 ~~~~md-example title="标签页"
@@ -1245,18 +1271,6 @@ flowchart LR
 这是第二个标签页的内容。
 :::
 ::::
-~~~~
-
-~~~~md-example title="折叠内容"
-::: details [点击展开 Markdown 折叠块]
-这里是折叠后的实际内容。
-:::
-
-<details>
-<summary>点击展开原生折叠块</summary>
-
-这里也可以继续写 Markdown。
-</details>
 ~~~~
 
 ~~~~md-example title="带标题、行号和高亮的代码块"

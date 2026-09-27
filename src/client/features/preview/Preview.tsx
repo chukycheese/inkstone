@@ -20,6 +20,7 @@ import {
   enhancePreview,
   renderPendingMermaid,
   resetMermaidNode,
+  toggleCodeBlockCollapse,
 } from '../../lib/markdown/enhance'
 import { updateTaskAtSourceLine } from '../../editor/commands'
 import { useUi } from '../../store/ui'
@@ -27,6 +28,8 @@ import { useNotes, findNoteByTitle } from '../../store/notes'
 import { useSession } from '../../store/session'
 import { previewSourceAnchors } from './preview-anchors'
 import { moveMarkdownTabFocus, selectMarkdownTab } from './markdown-tabs'
+import { capturePreviewInteractionState, restorePreviewInteractionState } from './preview-state'
+import { preferredScrollBehavior } from '../../lib/motion'
 
 export interface PreviewProps {
   content: string
@@ -35,6 +38,8 @@ export interface PreviewProps {
   onHeadings?: (headings: Heading[]) => void
   scrollerRef?: RefObject<HTMLDivElement | null>
   onRendered?: () => void
+  onInitialRender?: (scroller: HTMLDivElement) => void
+  onScroll?: (scroller: HTMLDivElement) => void
   className?: string
 }
 
@@ -45,6 +50,8 @@ export const Preview = memo(function Preview({
   onHeadings,
   scrollerRef: externalScrollerRef,
   onRendered,
+  onInitialRender,
+  onScroll,
   className,
 }: PreviewProps) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -66,12 +73,14 @@ export const Preview = memo(function Preview({
 
   const debounced = useDebounced(content, 90)
   const rendered = useMemo(() => renderMarkdown(debounced), [debounced, locale])
+  const embedContextTitle = rendered.hasEmbeds ? currentTitle : ''
   const [committedHtml, setCommittedHtml] = useState(rendered.html)
   const committedHtmlRef = useRef(committedHtml)
   const committedSourceRef = useRef(debounced)
   const preparationRef = useRef(0)
   const mermaidRevisionRef = useRef(0)
   const pendingViewportRef = useRef<PreviewViewport | null>(null)
+  const initialRenderRestoredRef = useRef(false)
   const copyResetTimersRef = useRef(new Map<HTMLElement, number>())
   const wikiNavigationRef = useRef(0)
   const wikiScrollCleanupRef = useRef<() => void>(() => {})
@@ -138,7 +147,7 @@ export const Preview = memo(function Preview({
       if (rendered.hasEmbeds) {
         await resolveNoteEmbeds(staging, {
           currentContent: debounced,
-          currentTitle,
+          currentTitle: embedContextTitle,
           isCurrent: () => !cancelled && revision === preparationRef.current,
         })
       }
@@ -146,8 +155,13 @@ export const Preview = memo(function Preview({
         math: settings.preview.math,
         mermaid: settings.preview.mermaid,
         dark: theme === 'dark',
+        codeBlockCollapseLines: settings.preview.codeBlockCollapse
+          ? settings.preview.codeBlockCollapseLines
+          : 0,
       })
       if (cancelled || revision !== preparationRef.current) return
+
+      restorePreviewInteractionState(staging, capturePreviewInteractionState(hostRef.current))
 
       const nextHtml = staging.innerHTML
       committedSourceRef.current = debounced
@@ -167,13 +181,15 @@ export const Preview = memo(function Preview({
       cancelled = true
     }
   }, [
-    currentTitle,
     debounced,
+    embedContextTitle,
     rendered.hasEmbeds,
     rendered.html,
     scrollerRef,
     settings.preview.math,
     settings.preview.mermaid,
+    settings.preview.codeBlockCollapse,
+    settings.preview.codeBlockCollapseLines,
     theme,
   ])
 
@@ -187,15 +203,18 @@ export const Preview = memo(function Preview({
     }
   }, [mermaidEpoch, settings.preview.mermaid, startMermaidRender])
 
-
   useLayoutEffect(() => {
     const snapshot = pendingViewportRef.current
     pendingViewportRef.current = null
     const scroller = scrollerRef.current
     const host = hostRef.current
     if (snapshot && scroller && host) restorePreviewViewport(scroller, host, snapshot)
+    if (!initialRenderRestoredRef.current && scroller) {
+      initialRenderRestoredRef.current = true
+      onInitialRender?.(scroller)
+    }
     onRendered?.()
-  }, [committedHtml, onRendered, scrollerRef])
+  }, [committedHtml, onInitialRender, onRendered, scrollerRef])
 
 
   const onClick = (event: React.MouseEvent) => {
@@ -241,6 +260,12 @@ export const Preview = memo(function Preview({
           copyResetTimersRef.current.set(copyButton, timer)
         })
         .catch(() => toast({ title: t("preview.could_not_copy"), tone: 'danger' }))
+      return
+    }
+
+    const collapseButton = target.closest<HTMLButtonElement>('[data-code-collapse]')
+    if (collapseButton) {
+      toggleCodeBlockCollapse(collapseButton)
       return
     }
 
@@ -338,7 +363,7 @@ export const Preview = memo(function Preview({
 
       }
       const heading = hostRef.current?.querySelector(`#${CSS.escape(id)}`)
-      heading?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      heading?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' })
     }
   }
 
@@ -350,7 +375,7 @@ export const Preview = memo(function Preview({
       return
     }
     const interactiveLink = (event.target as HTMLElement).closest<HTMLElement>(
-      '[data-wikilink], [data-tag]',
+      '[data-wikilink], [data-block-ref], [data-tag]',
     )
     if (interactiveLink && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault()
@@ -363,6 +388,7 @@ export const Preview = memo(function Preview({
       ref={scrollerRef}
       className={cn('h-full overflow-y-auto overscroll-contain px-4 py-3', className)}
       data-preview-scroller
+      onScroll={(event) => onScroll?.(event.currentTarget)}
     >
       <div
         ref={hostRef}
@@ -401,7 +427,7 @@ function scrollToWikiTarget(
 }
 
 function scrollElementIntoView(element: Element | null | undefined): void {
-  element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  element?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' })
 }
 
 interface PreviewViewport {

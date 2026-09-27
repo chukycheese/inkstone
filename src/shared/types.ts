@@ -88,7 +88,7 @@ export type BackgroundName = 'paper' | 'white'
 export type UiDensity = 'comfortable' | 'compact'
 export type ProseFont = 'sans' | 'serif'
 export type ProseWidth = 'narrow' | 'normal' | 'wide' | 'full'
-export type EditorLayout = 'edit' | 'split' | 'preview'
+export type EditorLayout = 'live' | 'split' | 'preview'
 export type BackupSchedule = 'off' | 'hourly' | 'sixHourly' | 'daily'
 
 export interface AppearanceSettings {
@@ -121,6 +121,8 @@ export interface PreviewSettings {
   showToc: boolean
   math: boolean
   mermaid: boolean
+  codeBlockCollapse: boolean
+  codeBlockCollapseLines: number
 }
 
 export interface BackupSettings {
@@ -464,6 +466,11 @@ export interface ShareInfo {
   expiresAt: number | null
   views: number
   createdAt: number
+}
+
+export interface ShareListItem extends ShareInfo {
+  noteTitle: string
+  deletedAt: number | null
 }
 
 export interface PublicNote {
