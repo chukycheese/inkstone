@@ -8,6 +8,7 @@ import { getMcpPreferences } from '../mcp/settings'
 import { editMcpNote, type McpWriteContext } from '../mcp/writes'
 import { getMeta, setMeta } from '../db/metadata'
 import { runChatModel } from '../lib/ai-chat'
+import { buildTrimmedStub, cleanYoutubeBody, extractUrlSource, isYouTubeCapture } from '../lib/youtube-clean'
 import { DATABASE_STATE_KEY } from '../db/schema'
 import { resolveCaptureUserId } from './capture'
 
@@ -226,7 +227,11 @@ async function distillOne(
   if (gate) return { ok: false, note_id: row.id, title: row.title, reason: gate }
   if (!context.env.AI) return { ok: false, note_id: row.id, title: row.title, error: 'Workers AI is not configured' }
 
-  const body = extractDistillBody(row.content).slice(0, DISTILL_BODY_CHARS)
+  const rawBody = extractDistillBody(row.content)
+  // YouTube page dumps are ~90% sidebar/comments/shopping boilerplate.
+  // Clean before distill so unrelated videos and products don't leak in.
+  const youtube = isYouTubeCapture(row.title, row.content)
+  const body = (youtube ? cleanYoutubeBody(rawBody) : rawBody).slice(0, DISTILL_BODY_CHARS)
   const system = [
     'You are a knowledge-base curator. Turn raw captured web/podcast/paper content into a concise, self-contained wiki entry in Korean.',
     'Rules:',
@@ -258,6 +263,24 @@ async function distillOne(
       oldText: hasWikiSection ? distillOldBlock(row.content) : undefined,
       text: section,
     })
+    // YouTube notes: swap the multi-KB page dump for a compact stub so the
+    // note stays attributable without keeping sidebar/comments/shopping junk.
+    // First distill only — refresh targets already carry a trimmed (or stub) body.
+    if (!refresh && youtube && row.content.includes(DISTILL_SOURCE_MARKER)) {
+      try {
+        await editMcpNote(context, {
+          operationId: newId(),
+          noteId: row.id,
+          expectedRev: note.rev,
+          operation: 'replace',
+          oldText: row.content,
+          text: buildTrimmedStub(row.title, extractUrlSource(row.content), rawBody.length),
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[distill] raw trim failed for ${row.id}: ${message}`)
+      }
+    }
     await enqueueNoteIndex(context.env.DB, context.userId, row.id, 'embed')
     return { ok: true, note_id: row.id, title: row.title, bytes: note.content.length }
   } catch (error) {
@@ -300,5 +323,9 @@ function looksLikeBrokenBody(body: string): boolean {
   const first = body.split('\n').find((l) => l.trim())?.trim() ?? ''
   if (!first) return true
   if (first.endsWith('.svg')) return true
+  // YouTube/Google bot-wall pages captured instead of the video.
+  if (/unusual traffic from your computer network|sign in to confirm you.?re not a bot/i.test(body.slice(0, 2000))) {
+    return true
+  }
   return BROKEN_BODY_PATTERNS.some((re) => re.test(first))
 }
