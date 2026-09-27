@@ -167,7 +167,7 @@ export function LoginPage() {
                 maxLength={LIMITS.passwordMaxLength}
                 onChange={(event) => setPassword(event.target.value)}
                 disabled={busy}
-                placeholder={registerMode ? t("auth.password_minimum_8_characters") : t("common.password")}
+                placeholder={t("common.password")}
                 autoComplete={registerMode ? 'new-password' : 'current-password'}
               />
             </>

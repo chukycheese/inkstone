@@ -94,8 +94,8 @@ export function createDemoBackend(): DemoBackend {
     if (body.currentPassword !== state.password) {
       return apiError(401, 'wrong_password', 'The current password is incorrect')
     }
-    if (typeof body.newPassword !== 'string' || body.newPassword.length < 8) {
-      return apiError(400, 'weak_password', 'The new password must contain at least 8 characters')
+    if (typeof body.newPassword !== 'string' || body.newPassword.length === 0) {
+      return apiError(400, 'weak_password', 'The new password must not be empty')
     }
     if (body.newPassword.length > LIMITS.passwordMaxLength) {
       return apiError(400, 'weak_password', 'The new password is too long')

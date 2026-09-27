@@ -3,7 +3,13 @@ import { LIMITS } from '@shared/constants'
 import { fromBase64Url, timingSafeEqual, toBase64Url } from './encoding'
 
 
-const PASSWORD_MIN_LENGTH = 8
+export function validateNewPassword(password: unknown): string | null {
+  if (typeof password !== 'string' || password.length === 0) {
+    return 'Password must not be empty'
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) return 'Password is too long'
+  return null
+}
 export const PASSWORD_MAX_LENGTH = LIMITS.passwordMaxLength
 export const USERNAME_PATTERN = /^[a-z0-9_-]{3,32}$/
 export const SCRYPT_N = 2 ** 14
@@ -23,14 +29,6 @@ interface ParsedPasswordHash {
 
 export function normalizeUsername(raw: string): string {
   return raw.trim().toLowerCase()
-}
-
-export function validateNewPassword(password: unknown): string | null {
-  if (typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH) {
-    return `Password must contain at least ${PASSWORD_MIN_LENGTH} characters`
-  }
-  if (password.length > PASSWORD_MAX_LENGTH) return 'Password is too long'
-  return null
 }
 
 export async function hashPassword(password: string): Promise<string> {

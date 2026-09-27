@@ -225,7 +225,7 @@ function PasswordSection() {
     if (busyRef.current) return
     setError(null)
     if (!currentPassword) return setError(t("settings.enter_your_current_password"))
-    if (newPassword.length < 8) return setError(t("settings.new_password_must_be_at_least_8_characters"))
+    if (!newPassword) return setError(t("settings.new_password_required"))
     if (newPassword !== confirmation) return setError(t("common.the_passwords_do_not_match"))
     busyRef.current = true
     setBusy(true)
