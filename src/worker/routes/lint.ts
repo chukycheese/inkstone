@@ -5,6 +5,7 @@ import { JSON_BODY_LIMITS, readJson } from '../lib/request'
 import { getMcpPreferences } from '../mcp/settings'
 import { createMcpNote, type McpWriteContext } from '../mcp/writes'
 import { getMeta, setMeta } from '../db/metadata'
+import { aiBudgetDayUTC, getAiBudgetCap, getAiBudgetUsage } from '../lib/ai-budget'
 import { DATABASE_STATE_KEY } from '../db/schema'
 import { resolveCaptureUserId } from './capture'
 
@@ -25,11 +26,13 @@ export interface LintReport {
   broken_notes: Array<{ note_id: string; title: string; excerpt: string }>
   orphan_notes: Array<{ note_id: string; title: string; updated_at: number }>
   unresolved_links: number
+  ai_budget: { day: string; used: number; cap: number; remaining: number }
 }
 
 // SQL-driven health check for the wiki (no LLM calls). The manual route and
 // the daily cron both compute the same report; saving it as a note is opt-in.
 export async function lintWiki(db: D1Database, userId: string): Promise<LintReport> {
+  const day = aiBudgetDayUTC()
   const [counts, folderRows, pending, broken, orphans, unresolved] = await Promise.all([
     db.prepare(
       `SELECT COUNT(*) AS n, COALESCE(SUM(word_count), 0) AS words FROM notes
@@ -73,6 +76,11 @@ export async function lintWiki(db: D1Database, userId: string): Promise<LintRepo
     ).bind(userId).first<{ n: number }>(),
   ])
 
+  const [budgetUsed, budgetCap] = await Promise.all([
+    getAiBudgetUsage(db, userId, day),
+    getAiBudgetCap(db),
+  ])
+
   return {
     generated_at: Date.now(),
     total_notes: counts?.n ?? 0,
@@ -101,6 +109,12 @@ export async function lintWiki(db: D1Database, userId: string): Promise<LintRepo
       updated_at: row.updated_at,
     })),
     unresolved_links: unresolved?.n ?? 0,
+    ai_budget: {
+      day,
+      used: budgetUsed,
+      cap: budgetCap,
+      remaining: Math.max(0, budgetCap - budgetUsed),
+    },
   }
 }
 
@@ -219,6 +233,9 @@ export function renderReportMarkdown(report: LintReport): string {
   }
 
   lines.push('', `## 미해결 위키링크 — ${report.unresolved_links}건`)
+
+  lines.push('', `## AI 예산 사용량 (Workers AI, ${report.ai_budget.day} UTC)`)
+  lines.push('', `- 오늘 사용: ${report.ai_budget.used}/${report.ai_budget.cap}회 (잔여 ${report.ai_budget.remaining}회)`)
   return lines.join('\n')
 }
 

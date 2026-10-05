@@ -3,6 +3,7 @@ import { LIMITS } from '@shared/constants'
 import type { AppBindings } from '../env'
 import { ApiError } from '../lib/errors'
 import { newId } from '../lib/id'
+import { tryConsumeAiBudgetCall } from '../lib/ai-budget'
 import { runChatModel } from '../lib/ai-chat'
 import { JSON_BODY_LIMITS, readJson } from '../lib/request'
 import { fuseByRrf, searchSemanticNotes } from '../mcp/ai-search'
@@ -131,6 +132,13 @@ queryRoutes.post('/', async (c) => {
     '- Never wrap the output in code fences. Output Markdown only.',
   ].join('\n')
   const user = `질문: ${question}\n\n다음은 위키에서 검색된 자료입니다.\n\n${contextParts.join('\n\n---\n\n')}`
+
+  // Per-user daily AI budget: over-budget members get a 429 instead of
+  // burning the shared neuron pool; retrieval above already ran without AI.
+  const budget = await tryConsumeAiBudgetCall(db, userId, 'query')
+  if (!budget.allowed) {
+    throw new ApiError(429, 'too_many_attempts', `Daily AI budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
+  }
 
   const answer = await runChatModel(c.env.AI, { system, user }, 'query')
   if (!answer) {

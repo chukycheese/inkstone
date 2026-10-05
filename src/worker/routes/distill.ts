@@ -8,6 +8,7 @@ import { getMcpPreferences } from '../mcp/settings'
 import { editMcpNote, type McpWriteContext } from '../mcp/writes'
 import { getMeta, setMeta } from '../db/metadata'
 import { runChatModel } from '../lib/ai-chat'
+import { getAiBudgetStatus, tryConsumeAiBudgetCall } from '../lib/ai-budget'
 import { buildTrimmedStub, cleanYoutubeBody, extractUrlSource, isYouTubeCapture } from '../lib/youtube-clean'
 import { DATABASE_STATE_KEY } from '../db/schema'
 import { resolveCaptureUserId } from './capture'
@@ -131,6 +132,13 @@ export async function drainDistillQueue(
 }
 
 async function drainUserDistills(context: McpWriteContext, max: number): Promise<number> {
+  // Per-user daily AI budget: an over-budget member is skipped here so their
+  // rows never starve the shared neuron pool; other users still distill.
+  const status = await getAiBudgetStatus(context.env.DB, context.userId)
+  if (status.exceeded) {
+    console.warn(`[distill] ai budget exceeded for ${context.userId} (${status.used}/${status.cap} calls today) — skipping`)
+    return 0
+  }
   const { results } = await context.env.DB.prepare(
     `SELECT id, title, content, rev FROM notes
       WHERE user_id = ?1 AND deleted_at IS NULL
@@ -244,6 +252,13 @@ async function distillOne(
     '- Be factual. Do not invent details that are not in the source. Keep it under ~800 Korean characters total.',
   ].join('\n')
   const user = `제목: ${row.title}\n\n본문:\n${body}`
+
+  // Reserve one AI call from this user's daily budget before hitting the
+  // shared Workers AI pool; over-budget users skip without failing others.
+  const budget = await tryConsumeAiBudgetCall(context.env.DB, context.userId, 'distill')
+  if (!budget.allowed) {
+    return { ok: false, note_id: row.id, title: row.title, reason: `ai budget exceeded (daily cap ${budget.cap})` }
+  }
 
   const markdown = await runChatModel(context.env.AI, { system, user }, 'distill')
   if (!markdown) {
