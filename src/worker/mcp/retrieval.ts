@@ -5,6 +5,7 @@ import { NOTE_COLUMNS, NOTE_COLUMNS_FULL, toNote, toNoteSummary, type NoteRow } 
 import type { Env } from '../env'
 import { ApiError } from '../lib/errors'
 import { isValidId } from '../lib/id'
+import { tryConsumeSearchBudgetCall } from '../lib/search-budget'
 import { searchUserNotes } from '../routes/search'
 import {
   fuseByRrf,
@@ -16,7 +17,8 @@ import {
 const FETCH_MAX_CHARS = 80_000
 const READ_DEFAULT_CHARS = 12_000
 const READ_MAX_CHARS = 40_000
-const SEARCH_CANDIDATES = 40
+// CKCZ-26: capped lexical fallback window for the semantic-first path.
+export const SEARCH_CANDIDATES = 20
 const HYBRID_CANDIDATES = 24
 
 export type McpSearchMode = 'auto' | 'lexical' | 'semantic' | 'hybrid'
@@ -63,21 +65,17 @@ export async function searchMcpNotes(
 ): Promise<McpSearchResponse> {
   const limit = Math.max(1, Math.min(20, options.limit ?? 8))
   const mode = options.mode ?? 'auto'
-  const lexicalQuery = composeLexicalQuery(options)
-  const { results: lexical } = await searchUserNotes(
-    env.DB, userId, lexicalQuery, SEARCH_CANDIDATES, ftsEnabled,
-  )
-  const lexicalHits: LexicalHit[] = lexical.map((hit) => ({
-    id: hit.note.id,
-    title: hit.note.title,
-    url: noteUrl(origin, hit.note.id),
-    snippet: hit.snippet,
-    score: hit.score,
-    rev: hit.note.rev,
-    updatedAt: hit.note.updatedAt,
-    excerpt: hit.note.excerpt,
-  }))
 
+  // CKCZ-26: per-user daily search-call guard, same 429 style as the HTTP
+  // search route (safeTool surfaces the ApiError to the MCP caller).
+  const budget = await tryConsumeSearchBudgetCall(env.DB, userId, 'mcp-search')
+  if (!budget.allowed) {
+    throw new ApiError(429, 'too_many_attempts', `Daily search budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
+  }
+
+  // CKCZ-26: semantic-first. The old code always ran the lexical (FTS/LIKE)
+  // scan before even trying semantic; now semantic runs first and the D1
+  // lexical scan only runs as a capped fallback (or for explicit hybrid).
   const wantsSemantic = mode === 'auto' || mode === 'hybrid' || mode === 'semantic'
   let semanticHits: SemanticSearchHit[] | null = null
   if (wantsSemantic) {
@@ -94,6 +92,41 @@ export async function searchMcpNotes(
       semanticHits = null
     }
   }
+
+  // Semantic hit on the default path: skip the lexical D1 scan entirely.
+  if (mode === 'auto' && semanticHits?.length) {
+    return {
+      results: semanticHits.slice(0, Math.min(limit, HYBRID_CANDIDATES)).map((hit) => ({
+        id: hit.id,
+        title: hit.title,
+        url: noteUrl(origin, hit.id),
+        snippet: semanticSnippet(hit.excerpt),
+        score: hit.score,
+        rev: hit.rev,
+        updatedAt: hit.updatedAt,
+        source: 'semantic' as const,
+      })),
+      mode: 'semantic',
+    }
+  }
+
+  const lexicalQuery = composeLexicalQuery(options)
+  const lexicalHits: LexicalHit[] =
+    mode === 'semantic' && semanticHits?.length
+      ? []
+      : (await searchUserNotes(
+          env.DB, userId, lexicalQuery, SEARCH_CANDIDATES, ftsEnabled,
+        )).results.map((hit) => ({
+          id: hit.note.id,
+          title: hit.note.title,
+          url: noteUrl(origin, hit.note.id),
+          snippet: hit.snippet,
+          score: hit.score,
+          rev: hit.note.rev,
+          updatedAt: hit.note.updatedAt,
+          excerpt: hit.note.excerpt,
+        }))
+
   if (!semanticHits || !semanticHits.length) {
     return {
       results: lexicalHits.slice(0, limit).map((hit) => ({ ...hit, source: 'lexical' as const })),

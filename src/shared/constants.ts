@@ -94,7 +94,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   },
   sync: {
     realtime: true,
-    pollIntervalMs: 15_000,
+    // CKCZ-26: slower polling fallback so quiet tabs stop hammering D1.
+    pollIntervalMs: 30_000,
   },
 }
 
@@ -203,7 +204,7 @@ export function mergeSettings(partial: unknown): UserSettings {
   base.sync.realtime = booleanValue(sync.realtime, base.sync.realtime)
   base.sync.pollIntervalMs = integerInRange(
     sync.pollIntervalMs,
-    5000,
+    15_000,
     120_000,
     base.sync.pollIntervalMs,
   )

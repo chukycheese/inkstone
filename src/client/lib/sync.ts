@@ -10,6 +10,27 @@ const HEARTBEAT_MS = 25_000
 const SAFETY_POLL_MS = 5 * 60_000
 const MAX_BACKOFF_MS = 30_000
 
+/**
+ * CKCZ-26: floor for the polling fallback. Realtime stays untouched; only
+ * the no-realtime poll path is slowed (was 5s).
+ */
+export const SYNC_MIN_POLL_MS = 30_000
+/** Idle backoff ceiling: consecutive no-change polls back off up to this. */
+export const SYNC_MAX_IDLE_POLL_MS = 5 * 60_000
+/** After this many consecutive no-change polls the backoff is maxed out. */
+export const SYNC_IDLE_BACKOFF_STEPS = 4
+
+/**
+ * Effective poll gap for the fallback path: doubles per consecutive
+ * no-change poll (30s → 60s → 120s → 240s → 300s cap). Any poll that
+ * observes a change resets the streak to zero. Pure helper for tests.
+ */
+export function nextPollIntervalMs(baseMs: number, consecutiveIdlePolls: number): number {
+  const base = Math.max(SYNC_MIN_POLL_MS, baseMs)
+  const idle = Math.max(0, Math.min(SYNC_IDLE_BACKOFF_STEPS, Math.trunc(consecutiveIdlePolls)))
+  return Math.min(SYNC_MAX_IDLE_POLL_MS, base * 2 ** idle)
+}
+
 export class SyncEngine {
   private socket: WebSocket | null = null
   private pollTimer = 0
@@ -25,20 +46,29 @@ export class SyncEngine {
   private scheduledPullShouldBroadcast = false
   private pullDueAt = 0
   private lastPullAt = 0
+  private consecutiveIdlePolls = 0
   private lastPong = 0
   private broadcast = createBroadcast((payload) => this.onBroadcast(payload))
+  private pollIntervalMs: number
 
   constructor(
     private realtimeEnabled: boolean,
-    private pollIntervalMs: number,
-  ) {}
+    pollIntervalMs: number,
+  ) {
+    this.pollIntervalMs = Math.max(SYNC_MIN_POLL_MS, pollIntervalMs)
+  }
+
+  /** Test seam: current idle streak driving the poll backoff. */
+  get idlePollsForTesting(): number {
+    return this.consecutiveIdlePolls
+  }
 
   /**
    * Applies live setting changes (realtime toggle, poll interval) without
    * tearing down the engine, its WebSocket, or its leadership claim.
    */
   updateConfig(realtimeEnabled: boolean, pollIntervalMs: number): void {
-    const interval = Math.max(5000, pollIntervalMs)
+    const interval = Math.max(SYNC_MIN_POLL_MS, pollIntervalMs)
     if (interval !== this.pollIntervalMs) {
       this.pollIntervalMs = interval
       this.startPolling()
@@ -265,6 +295,11 @@ export class SyncEngine {
       if (wsHealthy && Date.now() - this.lastPong < HEARTBEAT_MS * 2) {
         if (Date.now() - this.lastPullAt < SAFETY_POLL_MS) return
       }
+      // CKCZ-26: idle backoff — consecutive no-change polls stretch the gap
+      // so quiet tabs stop hammering D1. Realtime pushes bypass this via
+      // schedulePull; only the timer path is throttled.
+      const gap = nextPollIntervalMs(this.pollIntervalMs, this.consecutiveIdlePolls)
+      if (Date.now() - this.lastPullAt < gap) return
       void this.pull(true)
     }, this.pollIntervalMs)
   }
@@ -304,8 +339,13 @@ export class SyncEngine {
     if (pulled) {
       this.lastPullAt = Date.now()
       const cursor = useNotes.getState().cursor
-      if (shouldBroadcast && cursor > cursorBefore) {
-        this.broadcast.post({ type: 'pulled', cursor, clientId: CLIENT_ID })
+      if (cursor > cursorBefore) {
+        this.consecutiveIdlePolls = 0
+        if (shouldBroadcast) {
+          this.broadcast.post({ type: 'pulled', cursor, clientId: CLIENT_ID })
+        }
+      } else {
+        this.consecutiveIdlePolls += 1
       }
     }
   }
@@ -381,7 +421,7 @@ export function useSyncEngine(): void {
         const state = useSession.getState()
         engineRef.current = new SyncEngine(
           Boolean(state.site?.realtimeEnabled) && state.settings.sync.realtime,
-          Math.max(5000, state.settings.sync.pollIntervalMs),
+          Math.max(SYNC_MIN_POLL_MS, state.settings.sync.pollIntervalMs),
         )
         engineRef.current.start()
       })
