@@ -11,6 +11,7 @@ import { isValidId } from '../lib/id'
 import { acquireLease } from '../lib/lease'
 import { scheduleFtsDrain } from '../lib/notify'
 import { clampInt } from '../lib/request'
+import { tryConsumeSearchBudgetCall } from '../lib/search-budget'
 import { consumeAttemptBudget, ThrottleError } from '../lib/throttle'
 import { requireAuth } from '../middleware/auth'
 
@@ -18,6 +19,55 @@ export const searchRoutes = new Hono<AppBindings>()
 
 const GRAPH_EDGE_CANDIDATE_LIMIT = 10_000
 
+/**
+ * CKCZ-26: FTS `MATCH` + `bm25()` scores every match before LIMIT runs, so a
+ * large limit multiplies rows read per query. The FTS path is capped well
+ * below the old route maximum (200).
+ */
+export const FTS_MAX_LIMIT = 50
+/** Route-level ceiling for `GET /api/search` (was 200). */
+export const SEARCH_ROUTE_MAX_LIMIT = 50
+/** LIKE fallback over-fetch multiplier cap (was `limit * 3` up to 600). */
+export const LIKE_CANDIDATE_MULTIPLIER = 2
+export const LIKE_CANDIDATE_HARD_CAP = 100
+
+/**
+ * Common English + Korean words with no retrieval signal. A query made only
+ * of these would score the whole FTS index and return noise, so it skips
+ * MATCH scoring and falls back to a bounded title-only LIKE scan instead.
+ */
+export const SEARCH_STOPWORDS: ReadonlySet<string> = new Set([
+  'the', 'a', 'an', 'of', 'to', 'in', 'for', 'on', 'with', 'and', 'or', 'not',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'do', 'does', 'did',
+  'what', 'which', 'why', 'when', 'where', 'how', 'who', 'whom', 'whose',
+  'this', 'that', 'these', 'those', 'it', 'its', 'i', 'you', 'he', 'she',
+  'we', 'they', 'them', 'his', 'her', 'our', 'their', 'as', 'at', 'by',
+  'from', 'into', 'about', 'over', 'after',
+  '뭐', '뭐고', '뭐가', '뭐야', '뭔', '뭘', '뭔지', '무엇', '언제', '어디',
+  '어디서', '어떻게', '어떤', '왜', '누가', '누구', '무슨', '얼마나', '몇',
+  '이', '그', '저', '것', '거', '수', '등', '및', '또', '그리고', '그러나',
+  '하지만', '은', '는', '을', '를', '의', '에', '에서', '로', '으로',
+  '와', '과', '도', '만', '에게', '한', '하다', '있다', '없다', '되다', '이다',
+])
+
+/** True when every query term is a stop word (or there are no terms). */
+export function isStopwordOnlyQuery(q: ParsedQuery): boolean {
+  if (!q.terms.length) return true
+  return q.terms.every((term) => SEARCH_STOPWORDS.has(term.toLowerCase()))
+}
+
+/** Strip the `tag:`/`folder:`/`is:`/`in:` qualifiers parseQuery already consumed. */
+function stripQualifier(term: string): string {
+  const colon = term.indexOf(':')
+  return colon > 0 ? term.slice(colon + 1) : term
+}
+
+/** True when the raw query carries no retrieval signal beyond stop words. */
+export function isStopwordOnlyRaw(raw: string): boolean {
+  const tokens = raw.split(/\s+/).map((t) => t.replace(/[^A-Za-z0-9가-힣]+/g, '')).filter(Boolean)
+  if (!tokens.length) return true
+  return tokens.every((token) => SEARCH_STOPWORDS.has(stripQualifier(token).toLowerCase()))
+}
 
 export interface ParsedQuery {
   text: string
@@ -28,7 +78,6 @@ export interface ParsedQuery {
   archived: boolean | null
   trash: boolean
 }
-
 
 export function parseQuery(raw: string): ParsedQuery {
   const parsed: ParsedQuery = {
@@ -125,7 +174,10 @@ export async function searchUserNotes(
   const query = parseQuery(truncateText(raw.trim(), 512))
   if (!raw.trim()) return { results: [], mode: ftsEnabled ? 'fts' : 'like', query }
 
-  let useFts = ftsEnabled
+  // CKCZ-26: a stop-word-only query would score the whole FTS index for
+  // noise — skip MATCH and let likeSearch do a bounded title-only scan.
+  const stopwordOnly = isStopwordOnlyQuery(query)
+  let useFts = ftsEnabled && !stopwordOnly
   if (useFts) {
     try {
       if (drain) await drainFtsQueue(db, userId, 50, true)
@@ -137,7 +189,11 @@ export async function searchUserNotes(
 
   if (useFts && query.terms.length && !query.trash) {
     try {
-      return { results: await ftsSearch(db, userId, query, limit), mode: 'fts', query }
+      return {
+        results: await ftsSearch(db, userId, query, Math.min(limit, FTS_MAX_LIMIT)),
+        mode: 'fts',
+        query,
+      }
     } catch (error) {
       console.warn(
         '[inkstone] FTS query failed; falling back to LIKE:',
@@ -165,7 +221,14 @@ searchRoutes.get('/search', requireAuth, async (c) => {
   const started = Date.now()
   const userId = c.get('userId')
   const raw = truncateText((c.req.query('q') ?? '').trim(), 512)
-  const limit = clampInt(c.req.query('limit'), 1, 200, LIMITS.searchLimit)
+  const limit = clampInt(c.req.query('limit'), 1, SEARCH_ROUTE_MAX_LIMIT, LIMITS.searchLimit)
+
+  // CKCZ-26: per-user daily search-call guard — over-budget callers get a
+  // 429 instead of burning the account's D1 rows-read quota.
+  const budget = await tryConsumeSearchBudgetCall(c.env.DB, userId, 'search')
+  if (!budget.allowed) {
+    throw new ApiError(429, 'too_many_attempts', `Daily search budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
+  }
 
   if (!raw) {
     const empty: SearchResponse = {
@@ -248,15 +311,23 @@ async function likeSearch(
   let where = 'n.user_id = ?1'
   where += q.trash ? ' AND n.deleted_at IS NOT NULL' : ' AND n.deleted_at IS NULL'
 
+  // CKCZ-26: stop-word-only queries scan titles only (bounded, no full-body
+  // LIKE); real queries keep the title+content scan but with a smaller
+  // over-fetch window than the old `limit * 3` up to 600.
+  const titleOnly = isStopwordOnlyQuery(q)
   for (const term of q.terms) {
     binds.push(`%${escapeLike(term)}%`)
     const i = binds.length
     termBindIndexes.push(i)
-    where += ` AND (n.title LIKE ?${i} ESCAPE '\\' OR n.content LIKE ?${i} ESCAPE '\\')`
+    where += titleOnly
+      ? ` AND n.title LIKE ?${i} ESCAPE '\\'`
+      : ` AND (n.title LIKE ?${i} ESCAPE '\\' OR n.content LIKE ?${i} ESCAPE '\\')`
   }
   applyFilters(q, binds, (clause) => (where += clause))
 
-  const candidateLimit = q.terms.length ? Math.min(limit * 3, 600) : limit
+  const candidateLimit = q.terms.length
+    ? Math.min(limit * LIKE_CANDIDATE_MULTIPLIER, LIKE_CANDIDATE_HARD_CAP)
+    : limit
   let contentSelect = 'n.excerpt'
   if (q.terms.length) {
     binds.push(q.terms[0]!)

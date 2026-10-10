@@ -6,6 +6,7 @@ import { getMcpPreferences } from '../mcp/settings'
 import { createMcpNote, type McpWriteContext } from '../mcp/writes'
 import { getMeta, setMeta } from '../db/metadata'
 import { aiBudgetDayUTC, getAiBudgetCap, getAiBudgetUsage } from '../lib/ai-budget'
+import { getSearchBudgetCap, getSearchBudgetUsage, getSyncPollUsage } from '../lib/search-budget'
 import { DATABASE_STATE_KEY } from '../db/schema'
 import { resolveCaptureUserId } from './capture'
 
@@ -27,6 +28,8 @@ export interface LintReport {
   orphan_notes: Array<{ note_id: string; title: string; updated_at: number }>
   unresolved_links: number
   ai_budget: { day: string; used: number; cap: number; remaining: number }
+  search_budget: { day: string; used: number; cap: number; remaining: number }
+  sync_polls: { day: string; count: number }
 }
 
 // SQL-driven health check for the wiki (no LLM calls). The manual route and
@@ -76,9 +79,12 @@ export async function lintWiki(db: D1Database, userId: string): Promise<LintRepo
     ).bind(userId).first<{ n: number }>(),
   ])
 
-  const [budgetUsed, budgetCap] = await Promise.all([
+  const [budgetUsed, budgetCap, searchUsed, searchCap, syncPolls] = await Promise.all([
     getAiBudgetUsage(db, userId, day),
     getAiBudgetCap(db),
+    getSearchBudgetUsage(db, userId, day),
+    getSearchBudgetCap(db),
+    getSyncPollUsage(db, userId, day),
   ])
 
   return {
@@ -115,6 +121,13 @@ export async function lintWiki(db: D1Database, userId: string): Promise<LintRepo
       cap: budgetCap,
       remaining: Math.max(0, budgetCap - budgetUsed),
     },
+    search_budget: {
+      day,
+      used: searchUsed,
+      cap: searchCap,
+      remaining: Math.max(0, searchCap - searchUsed),
+    },
+    sync_polls: { day, count: syncPolls },
   }
 }
 
@@ -236,6 +249,10 @@ export function renderReportMarkdown(report: LintReport): string {
 
   lines.push('', `## AI 예산 사용량 (Workers AI, ${report.ai_budget.day} UTC)`)
   lines.push('', `- 오늘 사용: ${report.ai_budget.used}/${report.ai_budget.cap}회 (잔여 ${report.ai_budget.remaining}회)`)
+  lines.push('', `## 검색 호출량 (D1 읽기, ${report.search_budget.day} UTC)`)
+  lines.push('', `- 오늘 사용: ${report.search_budget.used}/${report.search_budget.cap}회 (잔여 ${report.search_budget.remaining}회)`)
+  lines.push('', `## 동기화 폴링 횟수 (D1 읽기, ${report.sync_polls.day} UTC)`)
+  lines.push('', `- 오늘 폴링: ${report.sync_polls.count}회`)
   return lines.join('\n')
 }
 
