@@ -476,6 +476,19 @@ export const api = {
     check: () => request<UpdateCheckResponse>('/api/update', { timeoutMs: 10_000 }),
   },
 
+  push: {
+    vapidKey: () => request<{ configured: boolean; publicKey: string | null }>('/api/push/vapid-key'),
+    subscribe: (body: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+      request<{ ok: true; endpoint: string }>('/api/push/subscriptions', { method: 'POST', body }),
+    unsubscribe: (endpoint: string) =>
+      request<{ ok: true; removed: boolean }>('/api/push/subscriptions', { method: 'DELETE', body: { endpoint } }),
+    test: (body: Record<string, never> = {}) =>
+      request<{ ok: boolean; sent: number; failed: number; removed: number; total: number }>(
+        '/api/push/test',
+        { method: 'POST', body },
+      ),
+  },
+
   share: {
     list: (signal?: AbortSignal) =>
       request<{ shares: ShareListItem[] }>('/api/share', { signal }),

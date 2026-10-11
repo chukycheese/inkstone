@@ -412,7 +412,18 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
   {
     version: 3,
     statements: [
-      `CREATE TABLE IF NOT EXISTS fts_index_queue (
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    user_id TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, endpoint)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
+     ON push_subscriptions(user_id, created_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS fts_index_queue (
         user_id TEXT NOT NULL,
         note_id TEXT NOT NULL,
         kind TEXT NOT NULL CHECK (kind IN ('upsert', 'delete')),
@@ -521,6 +532,21 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
       `CREATE INDEX IF NOT EXISTS idx_versions_user ON note_versions(user_id)`,
     ],
   },
+  {
+    version: 13,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS push_subscriptions (
+        user_id TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, endpoint)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
+         ON push_subscriptions(user_id, created_at DESC)`,
+    ],
+  },
 ]
 
 const FTS_STATEMENT = `CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
@@ -568,6 +594,7 @@ const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   mcp_api_keys: ['id', 'user_id', 'name', 'key_hash', 'scopes', 'created_at', 'last_used_at', 'revoked_at'],
   ai_note_embeddings: ['user_id', 'note_id', 'model', 'vector', 'indexed_at'],
   ai_index_queue: ['user_id', 'note_id', 'kind', 'created_at'],
+  push_subscriptions: ['user_id', 'endpoint', 'p256dh', 'auth', 'created_at'],
   fts_index_queue: ['user_id', 'note_id', 'kind', 'created_at'],
 } as const
 
@@ -599,6 +626,7 @@ const REQUIRED_TABLES = [
   'mcp_api_keys',
   'ai_note_embeddings',
   'ai_index_queue',
+  'push_subscriptions',
   'fts_index_queue',
 ] as const
 
@@ -642,6 +670,7 @@ const REQUIRED_INDEXES = [
   'idx_mcp_api_keys_revoked',
   'idx_ai_embeddings_indexed',
   'idx_ai_index_queue_due',
+  'idx_push_subscriptions_user',
   'idx_fts_index_queue_due',
 ] as const
 

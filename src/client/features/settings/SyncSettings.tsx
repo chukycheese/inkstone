@@ -6,6 +6,7 @@ import { SettingRow, Slider, Switch } from '../../components/form';
 import { useSession } from '../../store/session';
 import { useNotes } from '../../store/notes';
 import { useUi } from '../../store/ui';
+import { PushSettings } from './PushSettings';
 import { t } from "../../lib/i18n";
 export function SyncSettings() {
     const settings = useSession((s) => s.settings);
@@ -103,5 +104,7 @@ export function SyncSettings() {
           <Slider label={t("settings.polling_interval")} className="w-[200px]" value={Math.round(settings.sync.pollIntervalMs / 1000)} min={5} max={120} step={5} onChange={(seconds) => void update({ sync: { pollIntervalMs: seconds * 1000 } })} suffix={t("settings.sec")}/>
         </SettingRow>
       </section>
+
+      <PushSettings />
     </div>);
 }

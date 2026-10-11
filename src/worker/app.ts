@@ -17,6 +17,7 @@ import { shareManageRoutes, sharePageRoutes, shareRoutes } from './routes/share'
 import { transferRoutes } from './routes/transfer'
 import { updateRoutes } from './routes/update'
 import { captureRoutes } from './routes/capture'
+import { pushRoutes } from './routes/push'
 import { distillRoutes } from './routes/distill'
 import { queryRoutes } from './routes/query'
 import { lintRoutes } from './routes/lint'
@@ -102,6 +103,7 @@ export function createApp() {
   app.route('/api/update', updateRoutes)
   app.route('/api/mcp', mcpSettingsRoutes)
   app.route('/api/capture', captureRoutes)
+  app.route('/api/push', pushRoutes)
   app.route('/api/distill', distillRoutes)
   app.route('/api/query', queryRoutes)
   app.route('/api/lint', lintRoutes)

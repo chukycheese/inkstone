@@ -209,6 +209,52 @@ self.addEventListener('fetch', (event) => {
   })())
 })
 
+// CKCZ-27: Web Push. Payloads are JSON { title, body, noteId?, url? }
+// encrypted per RFC 8291; the push event decrypts at the platform layer and
+// only the plaintext reaches us here.
+self.addEventListener('push', (event) => {
+  let data = null
+  try {
+    data = event.data ? event.data.json() : null
+  } catch {
+    data = null
+  }
+  const title = (data && data.title) || 'Inkstone'
+  const body = (data && data.body) || ''
+  const url = (data && (data.url || (data.noteId ? '/n/' + data.noteId : null))) || '/'
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/pwa-192x192.png',
+      badge: '/pwa-192x192.png',
+      data: { url },
+    }),
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data && event.notification.data.url) || '/'
+  const target = new URL(url, self.location.origin).href
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    for (const client of windows) {
+      if (client.url === target) {
+        await client.focus()
+        return
+      }
+    }
+    for (const client of windows) {
+      if (new URL(client.url).origin === self.location.origin) {
+        await client.navigate(target)
+        await client.focus()
+        return
+      }
+    }
+    await self.clients.openWindow(target)
+  })())
+})
+
 async function cacheCoreResources() {
   const shell = await caches.open(SHELL_CACHE)
   await forEachConcurrent(CORE_URLS, 4, async (url) => {
