@@ -12,7 +12,6 @@ import { getAiBudgetStatus, tryConsumeAiBudgetCall } from '../lib/ai-budget'
 import { buildTrimmedStub, cleanYoutubeBody, extractUrlSource, isYouTubeCapture } from '../lib/youtube-clean'
 import { DATABASE_STATE_KEY } from '../db/schema'
 import { resolveCaptureUserId } from './capture'
-import { notifyDistillComplete } from './push'
 
 export const distillRoutes = new Hono<AppBindings>()
 
@@ -75,7 +74,6 @@ distillRoutes.post('/', async (c) => {
     const gate = gateCandidate(row, body.refresh)
     if (gate) throw ApiError.badRequest(gate)
     const result = await distillOne(writer, row, body.refresh)
-    queueDistillNotification(c, userId, result)
     return c.json({ ok: result.ok, processed: result.ok ? 1 : 0, results: [result] })
   }
 
@@ -89,27 +87,10 @@ distillRoutes.post('/', async (c) => {
     results.push(result)
     if (result.ok) {
       processed++
-      queueDistillNotification(c, userId, result)
     }
   }
   return c.json({ ok: results.some((r) => r.ok), processed, results })
 })
-
-/**
- * P1 (CKCZ-27): best-effort push on distill completion. notifyDistillComplete
- * never throws and runs in waitUntil, so push errors can never fail a distill.
- */
-function queueDistillNotification(
-  c: { executionCtx?: { waitUntil?: (promise: Promise<unknown>) => void }; env: Env },
-  userId: string,
-  result: DistillResult,
-): void {
-  if (!result.ok) return
-  try {
-    c.executionCtx?.waitUntil?.(notifyDistillComplete(c.env.DB, c.env, userId, result.note_id, result.title))
-  } catch {
-  }
-}
 
 /**
  * Cron entry: distill a small, daily-capped batch of captured notes so the
@@ -172,10 +153,6 @@ async function drainUserDistills(context: McpWriteContext, max: number): Promise
     try {
       const result = await distillOne(context, row)
       if (result) done++
-      if (result.ok) {
-        // Cron path: notifyDistillComplete never throws, safe to await inline.
-        await notifyDistillComplete(context.env.DB, context.env, context.userId, row.id, row.title)
-      }
     } catch (error) {
       console.warn('[distill] drain paused:', error instanceof Error ? error.message : error)
       break
