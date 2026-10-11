@@ -12,6 +12,11 @@ import {
 } from '../lib/web-push'
 import { toBase64Url } from '../lib/encoding'
 import { requireAuth } from '../middleware/auth'
+import {
+  getVocabSchedule,
+  normalizeVocabSchedule,
+  putVocabSchedule,
+} from '../lib/vocab-push'
 
 export const pushRoutes = new Hono<AppBindings>()
 
@@ -135,6 +140,23 @@ export async function sendPushToUser(
     return empty
   }
 }
+
+/**
+ * CKCZ-28: per-user vocab/quiz push schedule. Member-isolated (keyed by the
+ * caller's user id), default off; send times are `HH:MM` in KST.
+ */
+pushRoutes.get('/vocab-schedule', async (c) => {
+  const userId = c.get('userId')
+  return c.json({ schedule: await getVocabSchedule(c.env.DB, userId) })
+})
+
+pushRoutes.put('/vocab-schedule', async (c) => {
+  const userId = c.get('userId')
+  const body = await readJson<Record<string, unknown>>(c, JSON_BODY_LIMITS.small)
+  const schedule = normalizeVocabSchedule(body)
+  await putVocabSchedule(c.env.DB, userId, schedule)
+  return c.json({ ok: true, schedule })
+})
 
 /** Test-send: delivers a sample notification to the caller's own devices only. */
 pushRoutes.post('/test', async (c) => {
