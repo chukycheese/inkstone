@@ -15,6 +15,7 @@ import { isValidId, newId, newSlug } from '../lib/id'
 import { broadcastUserCursor } from '../lib/notify'
 import { hashPassword } from '../lib/password'
 import { consumeAttemptBudget, ThrottleError } from '../lib/throttle'
+import { tryConsumeSearchBudgetCall } from '../lib/search-budget'
 import { runIdempotent } from './operations'
 import { folderPromotionOrder } from '../routes/folders'
 import { rewriteTagInNotes } from '../routes/tags'
@@ -23,6 +24,12 @@ import { createMcpNote, editMcpNote, organizeMcpNote, type McpWriteContext } fro
 interface LibraryContext extends McpWriteContext {
   origin: string
 }
+
+/**
+ * CKCZ-31: per-request full-content row ceiling for property queries (was
+ * an uncapped-feeling 500). Each scanned row pulls the whole note body.
+ */
+export const MCP_PROPERTY_SCAN_LIMIT = 200
 
 interface FolderRow {
   id: string
@@ -187,9 +194,16 @@ export async function queryMcpNoteProperties(
     limit?: number
   },
 ) {
+  // CKCZ-31: this path reads every scanned note's full content (giant table
+  // notes included), so an uncapped full-library scan per call is the
+  // fastest way a mass MCP session burns the daily rows-read quota.
+  const budget = await tryConsumeSearchBudgetCall(db, userId, 'property-query')
+  if (!budget.allowed) {
+    throw new ApiError(429, 'too_many_attempts', `Daily search budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
+  }
   const { results } = await db.prepare(
     `SELECT id, title, content, rev, updated_at FROM notes
-      WHERE user_id = ?1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 500`,
+      WHERE user_id = ?1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ${MCP_PROPERTY_SCAN_LIMIT}`,
   ).bind(userId).all<{ id: string; title: string; content: string; rev: number; updated_at: number }>()
   const limit = Math.max(1, Math.min(50, input.limit ?? 20))
   const matches = []
@@ -207,7 +221,7 @@ export async function queryMcpNoteProperties(
     })
     if (matches.length >= limit) break
   }
-  return { results: matches, scanned: results.length, scan_limit: 500 }
+  return { results: matches, scanned: results.length, scan_limit: MCP_PROPERTY_SCAN_LIMIT }
 }
 
 export async function createMcpFolder(

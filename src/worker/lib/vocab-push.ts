@@ -194,6 +194,62 @@ export async function putVocabSchedule(db: D1Database, userId: string, schedule:
   await setMeta(db, vocabScheduleKey(userId), JSON.stringify(schedule))
 }
 
+/** Meta key caching one user's parsed vocab pool so cron ticks don't re-scan the giant notes. */
+export const VOCAB_POOL_CACHE_META_PREFIX = 'vocab-pool-cache:'
+
+export function vocabPoolCacheKey(userId: string): string {
+  return `${VOCAB_POOL_CACHE_META_PREFIX}${userId}`
+}
+
+export interface VocabPoolMetaRow {
+  id: string
+  updated_at: number
+  len: number
+}
+
+/**
+ * Lightweight checksum over pool-note identity + freshness + size. Content
+ * is never read: the checksum query selects `length(content)`, so an
+ * unchanged pool is detected without pulling the giant table bodies.
+ */
+export function checksumVocabPoolMeta(rows: VocabPoolMetaRow[]): string {
+  return rows
+    .map((row) => `${row.id}:${row.updated_at}:${row.len}`)
+    .sort()
+    .join('|')
+}
+
+export function serializeVocabPool(checksum: string, words: VocabWord[]): string {
+  return JSON.stringify({ checksum, words })
+}
+
+/**
+ * Parses a cached pool; null on any garbage so callers fall through to a
+ * fresh load. Strict on purpose: a partial word list would shift the
+ * deterministic rotation, so one bad entry invalidates the whole cache.
+ */
+export function parseCachedVocabPool(raw: string | null): { checksum: string; words: VocabWord[] } | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as { checksum?: unknown; words?: unknown }
+    if (typeof parsed.checksum !== 'string' || !Array.isArray(parsed.words)) return null
+    for (const entry of parsed.words) {
+      if (!entry || typeof entry !== 'object') return null
+      const word = entry as Record<string, unknown>
+      if (
+        typeof word.word !== 'string' || !word.word
+        || typeof word.meaning !== 'string'
+        || typeof word.example !== 'string'
+        || typeof word.noteId !== 'string' || !word.noteId
+        || typeof word.noteTitle !== 'string'
+      ) return null
+    }
+    return { checksum: parsed.checksum, words: parsed.words as VocabWord[] }
+  } catch {
+    return null
+  }
+}
+
 /** Reads the 기출 pool for one user: IELTS note first, then TOEFL. */
 export async function loadVocabPool(db: D1Database, userId: string): Promise<VocabWord[]> {
   const folder = await db.prepare(
@@ -213,6 +269,49 @@ export async function loadVocabPool(db: D1Database, userId: string): Promise<Voc
   const order: Map<string, number> = new Map(VOCAB_NOTE_TITLES.map((title, index) => [title, index]))
   const sorted = [...results].sort((a, b) => (order.get(a.title) ?? 99) - (order.get(b.title) ?? 99))
   return sorted.flatMap((row) => parseVocabTable(row.content, row.id, row.title))
+}
+
+/**
+ * CKCZ-31: cached pool read. The pool notes are giant (~3,600-word tables)
+ * and the cron ticks 3x/hour, so every tick re-scanning them adds up. The
+ * checksum query reads only id/updated_at/length — no bodies — and a cache
+ * hit skips the full-content read entirely. One key per user (no per-day
+ * fan-out); a pool edit changes the checksum and reloads on the next tick.
+ * Best-effort throughout: cache failures fall through to a fresh load.
+ */
+export async function loadVocabPoolCached(db: D1Database, userId: string): Promise<VocabWord[]> {
+  const folder = await db.prepare(
+    `SELECT id FROM folders
+      WHERE user_id = ?1 AND deleted_at IS NULL AND lower(name) = ?2
+      ORDER BY position ASC LIMIT 1`,
+  ).bind(userId, VOCAB_FOLDER_NAME_LOWER).first<{ id: string }>()
+  if (!folder) return []
+  const ieltsTitle: string = VOCAB_NOTE_TITLES[0]
+  const toeflTitle: string = VOCAB_NOTE_TITLES[1]
+  const { results } = await db.prepare(
+    `SELECT id, updated_at, length(content) AS len FROM notes
+      WHERE user_id = ?1 AND folder_id = ?2 AND deleted_at IS NULL
+        AND (title = ?3 OR title = ?4)`,
+  ).bind(userId, folder.id, ieltsTitle, toeflTitle)
+    .all<{ id: string; updated_at: number; len: number }>()
+  const checksum = checksumVocabPoolMeta(results.map((row) => ({
+    id: row.id,
+    updated_at: row.updated_at,
+    len: row.len,
+  })))
+  try {
+    const cached = parseCachedVocabPool(await getMeta(db, vocabPoolCacheKey(userId)))
+    if (cached && cached.checksum === checksum) return cached.words
+  } catch {
+    // Fall through to a fresh load.
+  }
+  const pool = await loadVocabPool(db, userId)
+  try {
+    await setMeta(db, vocabPoolCacheKey(userId), serializeVocabPool(checksum, pool))
+  } catch {
+    // A failed cache write must never fail the push.
+  }
+  return pool
 }
 
 export interface WordPushContent {
@@ -325,6 +424,14 @@ async function runVocabPushForUser(
 
   const result = { ...empty }
   let sentAnything = false
+  // CKCZ-31: one lazy pool load per tick, shared by the word slots and the
+  // quiz slot. The old code re-read the giant pool notes per slot (up to 4
+  // full-content reads/user/day); now a tick with N due slots reads once.
+  let pool: VocabWord[] | null = null
+  const getPool = async (): Promise<VocabWord[]> => {
+    if (!pool) pool = await loadVocabPoolCached(env.DB, userId)
+    return pool
+  }
 
   for (let slotIndex = 0; slotIndex < VOCAB_SLOTS_PER_DAY; slotIndex++) {
     const slotMinutes = parseSlotTime(schedule.wordSlots[slotIndex])
@@ -333,7 +440,7 @@ async function runVocabPushForUser(
     const attempt: SlotAttempt = { userId, slotId: `word-${slotIndex}`, day }
     if (await alreadySent(env.DB, attempt)) continue
     try {
-      const sent = await sendWordSlot(env, userId, day, dayIndex, slotIndex)
+      const sent = await sendWordSlot(env, userId, day, dayIndex, slotIndex, await getPool())
       await markSent(env.DB, attempt)
       if (sent) {
         result.words++
@@ -349,7 +456,7 @@ async function runVocabPushForUser(
     const attempt: SlotAttempt = { userId, slotId: 'quiz', day }
     if (!(await alreadySent(env.DB, attempt))) {
       try {
-        const sent = await sendQuizSlot(env, userId, day, dayIndex)
+        const sent = await sendQuizSlot(env, userId, day, dayIndex, await getPool())
         // Mark unless the model transiently failed, so an over-budget or
         // unconfigured account still caps at one quiz attempt per day while a
         // flaky model gets retried on the next cron tick inside the window.
@@ -383,8 +490,8 @@ async function sendWordSlot(
   day: string,
   dayIndex: number,
   slotIndex: number,
+  pool: VocabWord[],
 ): Promise<boolean> {
-  const pool = await loadVocabPool(env.DB, userId)
   if (pool.length === 0) {
     console.warn(`[vocab-push] no vocab pool for ${userId} (folder \`10 English\` with 기출 notes) — skipping`)
     return false
@@ -405,8 +512,8 @@ async function sendQuizSlot(
   userId: string,
   day: string,
   dayIndex: number,
+  pool: VocabWord[],
 ): Promise<'sent' | 'skipped' | 'retry'> {
-  const pool = await loadVocabPool(env.DB, userId)
   if (pool.length === 0) {
     console.warn(`[vocab-push] no vocab pool for ${userId} (folder \`10 English\` with 기출 notes) — skipping`)
     return 'skipped'

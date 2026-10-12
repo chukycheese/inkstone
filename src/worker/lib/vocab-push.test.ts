@@ -2,16 +2,21 @@ import { describe, expect, it } from 'vitest'
 import {
   buildQuizPrompt,
   buildWordPush,
+  checksumVocabPoolMeta,
   daysSinceStart,
   defaultVocabSchedule,
   isSlotDue,
+  loadVocabPoolCached,
   normalizeVocabSchedule,
+  parseCachedVocabPool,
   parseSlotTime,
   parseVocabTable,
   selectDayWords,
   selectSlotWords,
+  serializeVocabPool,
   toKstDayAndMinutes,
   VOCAB_EXAM_DAY,
+  vocabPoolCacheKey,
   VOCAB_POOL_SIZE_NOMINAL,
   VOCAB_START_DAY,
   VOCAB_WORDS_PER_DAY,
@@ -214,5 +219,133 @@ describe('buildQuizPrompt', () => {
     expect(prompt.system).toMatch(/paraphrase/i)
     expect(prompt.system).toMatch(/문장 만들기/)
     expect(prompt.system).toMatch(/NOT include answers/)
+  })
+})
+
+describe('vocab pool cache keys (CKCZ-31)', () => {
+  it('keys the cache per user without per-day fan-out', () => {
+    expect(vocabPoolCacheKey('user-1')).toBe('vocab-pool-cache:user-1')
+    expect(vocabPoolCacheKey('user-2')).not.toBe(vocabPoolCacheKey('user-1'))
+  })
+
+  it('checksums identity + freshness + size, order-independently', () => {
+    const rows = [
+      { id: 'b', updated_at: 20, len: 300 },
+      { id: 'a', updated_at: 10, len: 100 },
+    ]
+    expect(checksumVocabPoolMeta(rows)).toBe('a:10:100|b:20:300')
+    expect(checksumVocabPoolMeta([...rows].reverse())).toBe(checksumVocabPoolMeta(rows))
+    expect(checksumVocabPoolMeta([])).toBe('')
+    // Any pool edit changes the checksum and forces a reload.
+    expect(checksumVocabPoolMeta([{ id: 'a', updated_at: 11, len: 100 }])).not.toBe(
+      checksumVocabPoolMeta([{ id: 'a', updated_at: 10, len: 100 }]),
+    )
+  })
+
+  it('round-trips a pool through serialize/parse', () => {
+    const words = [fakeWord(0), fakeWord(1)]
+    const parsed = parseCachedVocabPool(serializeVocabPool('cs-1', words))
+    expect(parsed).toEqual({ checksum: 'cs-1', words })
+  })
+
+  it('rejects garbage so callers fall through to a fresh load', () => {
+    expect(parseCachedVocabPool(null)).toBeNull()
+    expect(parseCachedVocabPool('')).toBeNull()
+    expect(parseCachedVocabPool('not json')).toBeNull()
+    expect(parseCachedVocabPool(JSON.stringify({ words: [] }))).toBeNull()
+    expect(parseCachedVocabPool(JSON.stringify({ checksum: 'c' }))).toBeNull()
+    // One bad entry invalidates the whole cache (protects the rotation).
+    expect(parseCachedVocabPool(JSON.stringify({
+      checksum: 'c',
+      words: [{ ...fakeWord(0) }, { word: '', meaning: 'x', example: 'y', noteId: 'n', noteTitle: 't' }],
+    }))).toBeNull()
+    expect(parseCachedVocabPool(JSON.stringify({
+      checksum: 'c',
+      words: [{ word: 'w', meaning: 'm', example: 'e', noteId: '', noteTitle: 't' }],
+    }))).toBeNull()
+  })
+})
+
+const FULL_POOL_SQL = 'SELECT id, title, content FROM notes'
+
+function createVocabFakeDb(opts: {
+  folderId?: string | null
+  metaRows?: Array<{ id: string; updated_at: number; len: number }>
+  noteRows?: Array<{ id: string; title: string; content: string }>
+  meta?: Record<string, string>
+}) {
+  const store = new Map(Object.entries(opts.meta ?? {}))
+  const prepared: string[] = []
+  const db = {
+    prepare(sql: string) {
+      prepared.push(sql)
+      const stmt = {
+        binds: [] as unknown[],
+        bind(...args: unknown[]) {
+          stmt.binds = args
+          return stmt
+        },
+        async first() {
+          if (/FROM folders/.test(sql)) return opts.folderId ? { id: opts.folderId } : null
+          if (/FROM app_meta/.test(sql)) {
+            const value = store.get(stmt.binds[0] as string)
+            return value === undefined ? null : { value }
+          }
+          return null
+        },
+        async all() {
+          if (/length\(content\)/.test(sql)) return { results: opts.metaRows ?? [] }
+          return { results: opts.noteRows ?? [] }
+        },
+        async run() {
+          if (/INSERT INTO app_meta/i.test(sql)) {
+            const [key, value] = stmt.binds as [string, string]
+            store.set(key, value)
+          }
+          return { success: true }
+        },
+      }
+      return stmt
+    },
+  }
+  return { db: db as unknown as D1Database, store, prepared }
+}
+
+describe('loadVocabPoolCached (CKCZ-31)', () => {
+  const table = '| abandon | 버리다 | He left. |\n| ability | 능력 | She can. |'
+
+  it('skips the full-content read on a checksum hit', async () => {
+    const metaRows = [{ id: 'n1', updated_at: 100, len: 50 }]
+    const cachedWords = [{ ...fakeWord(0), noteId: 'n1' }]
+    const { db, store, prepared } = createVocabFakeDb({
+      folderId: 'f1',
+      metaRows,
+      noteRows: [{ id: 'n1', title: 'IELTS 기출 단어', content: table }],
+      meta: { [vocabPoolCacheKey('u1')]: serializeVocabPool(checksumVocabPoolMeta(metaRows), cachedWords) },
+    })
+    await expect(loadVocabPoolCached(db, 'u1')).resolves.toEqual(cachedWords)
+    expect(prepared.some((sql) => sql.includes(FULL_POOL_SQL))).toBe(false)
+    expect(store.get(vocabPoolCacheKey('u1'))).toContain('word0')
+  })
+
+  it('reloads and rewrites the cache on a checksum miss', async () => {
+    const metaRows = [{ id: 'n1', updated_at: 101, len: 60 }]
+    const { db, store, prepared } = createVocabFakeDb({
+      folderId: 'f1',
+      metaRows,
+      noteRows: [{ id: 'n1', title: 'IELTS 기출 단어', content: table }],
+      meta: { [vocabPoolCacheKey('u1')]: serializeVocabPool('stale-checksum', [fakeWord(9)]) },
+    })
+    const pool = await loadVocabPoolCached(db, 'u1')
+    expect(pool.map((w) => w.word)).toEqual(['abandon', 'ability'])
+    expect(prepared.some((sql) => sql.includes(FULL_POOL_SQL))).toBe(true)
+    expect(parseCachedVocabPool(store.get(vocabPoolCacheKey('u1')) ?? null)?.checksum)
+      .toBe(checksumVocabPoolMeta(metaRows))
+  })
+
+  it('returns empty without a pool folder and never touches notes', async () => {
+    const { db, prepared } = createVocabFakeDb({ folderId: null })
+    await expect(loadVocabPoolCached(db, 'u1')).resolves.toEqual([])
+    expect(prepared.some((sql) => /FROM notes/.test(sql))).toBe(false)
   })
 })

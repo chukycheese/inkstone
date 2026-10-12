@@ -15,14 +15,18 @@ const MAX_BACKOFF_MS = 30_000
  * the no-realtime poll path is slowed (was 5s).
  */
 export const SYNC_MIN_POLL_MS = 30_000
-/** Idle backoff ceiling: consecutive no-change polls back off up to this. */
-export const SYNC_MAX_IDLE_POLL_MS = 5 * 60_000
+/**
+ * Idle backoff ceiling: consecutive no-change polls back off up to this.
+ * CKCZ-31: doubled from 5 to 10 minutes — quiet tabs now poll D1 at most
+ * ~6x/hour instead of ~12x/hour. Realtime pushes bypass this entirely.
+ */
+export const SYNC_MAX_IDLE_POLL_MS = 10 * 60_000
 /** After this many consecutive no-change polls the backoff is maxed out. */
-export const SYNC_IDLE_BACKOFF_STEPS = 4
+export const SYNC_IDLE_BACKOFF_STEPS = 5
 
 /**
  * Effective poll gap for the fallback path: doubles per consecutive
- * no-change poll (30s → 60s → 120s → 240s → 300s cap). Any poll that
+ * no-change poll (30s → 60s → 120s → 240s → 480s → 600s cap). Any poll that
  * observes a change resets the streak to zero. Pure helper for tests.
  */
 export function nextPollIntervalMs(baseMs: number, consecutiveIdlePolls: number): number {

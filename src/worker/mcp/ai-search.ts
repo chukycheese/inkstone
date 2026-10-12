@@ -16,7 +16,13 @@ import type { Env } from '../env'
 export const AI_EMBEDDING_MODEL = '@cf/baai/bge-m3'
 const AI_EMBEDDING_DIMS = 1024
 const EMBED_TEXT_MAX_CHARS = 4_000
-const MAX_SEMANTIC_VECTORS = 8_000
+/**
+ * CKCZ-31: per-query vector row ceiling (was 8,000). Semantic retrieval
+ * loads every candidate vector into memory to score it, so each MCP/HTTP
+ * search read up to 8k rows; 2k keeps recall for personal-size libraries
+ * while cutting the worst case 4x.
+ */
+export const MAX_SEMANTIC_VECTORS = 2_000
 const SEMANTIC_TOP_K = 40
 const DRAIN_USERS_PER_RUN = 10
 const DRAIN_PER_USER = 25

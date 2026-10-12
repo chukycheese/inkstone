@@ -49,13 +49,13 @@ export async function lintWiki(db: D1Database, userId: string): Promise<LintRepo
         GROUP BY f.id ORDER BY f.position ASC, f.name COLLATE NOCASE ASC`,
     ).bind(userId).all<{ id: string; name: string; note_count: number }>(),
     db.prepare(
-      `SELECT id, title, content FROM notes
+      `SELECT id, title, length(content) AS len, instr(content, ?4) AS pos FROM notes
         WHERE user_id = ?1 AND deleted_at IS NULL
           AND length(content) > ?2 AND instr(content, ?3) = 0
           AND instr(content, ?4) > 0
         ORDER BY created_at ASC LIMIT 25`,
     ).bind(userId, LINT_BROKEN_MIN_CAPTURE_CHARS, DISTILL_MARKER, DISTILL_SOURCE_MARKER)
-      .all<{ id: string; title: string; content: string }>(),
+      .all<{ id: string; title: string; len: number; pos: number }>(),
     db.prepare(
       `SELECT id, title, excerpt FROM notes
         WHERE user_id = ?1 AND deleted_at IS NULL AND is_archived = 0
@@ -102,7 +102,7 @@ export async function lintWiki(db: D1Database, userId: string): Promise<LintRepo
     pending_distill: pending.results.map((row) => ({
       note_id: row.id,
       title: row.title,
-      length: captureBodyLength(row.content),
+      length: pendingDistillLength(row.len, row.pos),
     })),
     broken_notes: broken.results.map((row) => ({
       note_id: row.id,
@@ -269,7 +269,14 @@ async function findInboxFolderId(db: D1Database, userId: string): Promise<string
   return row?.id ?? null
 }
 
-function captureBodyLength(content: string): number {
-  const idx = content.indexOf(DISTILL_SOURCE_MARKER)
-  return (idx >= 0 ? content.slice(idx + DISTILL_SOURCE_MARKER.length) : content).trim().length
+/**
+ * CKCZ-31: length of the raw-capture body after the `Markdown Content:`
+ * marker, computed from SQL `length()`/`instr()` so lint never pulls full
+ * note contents (giant table notes included) just to measure them. Off by
+ * surrounding whitespace vs the old trimmed measure — display-only.
+ */
+export function pendingDistillLength(totalLen: number, markerPos: number): number {
+  if (!Number.isFinite(totalLen) || totalLen <= 0) return 0
+  const start = markerPos > 0 ? markerPos - 1 + DISTILL_SOURCE_MARKER.length : 0
+  return Math.max(0, Math.trunc(totalLen) - start)
 }

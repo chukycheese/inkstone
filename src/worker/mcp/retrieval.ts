@@ -111,11 +111,16 @@ export async function searchMcpNotes(
   }
 
   const lexicalQuery = composeLexicalQuery(options)
+  // CKCZ-31: never drain the FTS queue inline here. Draining re-indexes up
+  // to 50 queued notes (full-content reads + FTS writes) per search, so a
+  // mass MCP session of hundreds of searches/edits multiplies rows-read per
+  // call. Indexing is covered by the hourly cron drain plus the write-path
+  // scheduled drain — same split the HTTP search route already uses.
   const lexicalHits: LexicalHit[] =
     mode === 'semantic' && semanticHits?.length
       ? []
       : (await searchUserNotes(
-          env.DB, userId, lexicalQuery, SEARCH_CANDIDATES, ftsEnabled,
+          env.DB, userId, lexicalQuery, SEARCH_CANDIDATES, ftsEnabled, false,
         )).results.map((hit) => ({
           id: hit.note.id,
           title: hit.note.title,
