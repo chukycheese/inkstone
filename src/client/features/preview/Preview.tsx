@@ -26,6 +26,17 @@ import { updateTaskAtSourceLine } from '../../editor/commands'
 import { useUi } from '../../store/ui'
 import { useNotes, findNoteByTitle } from '../../store/notes'
 import { useSession } from '../../store/session'
+import { createRoot, type Root } from 'react-dom/client'
+import { BlockEditor } from './BlockEditor'
+import {
+  collectBlockStartLines,
+  countContentLines,
+  findEditableBlock,
+  isInteractivePreviewTarget,
+  replaceBlockLines,
+  resolveBlockEnd,
+  sliceBlockLines,
+} from './block-edit'
 import { previewSourceAnchors } from './preview-anchors'
 import { moveMarkdownTabFocus, selectMarkdownTab } from './markdown-tabs'
 import { capturePreviewInteractionState, restorePreviewInteractionState } from './preview-state'
@@ -35,6 +46,8 @@ export interface PreviewProps {
   content: string
   noteId?: string
   noteTitle?: string
+  /** Click a rendered block to edit it in place. Defaults to true. */
+  editable?: boolean
   onHeadings?: (headings: Heading[]) => void
   scrollerRef?: RefObject<HTMLDivElement | null>
   onRendered?: () => void
@@ -47,6 +60,7 @@ export const Preview = memo(function Preview({
   content,
   noteId,
   noteTitle,
+  editable = true,
   onHeadings,
   scrollerRef: externalScrollerRef,
   onRendered,
@@ -85,6 +99,106 @@ export const Preview = memo(function Preview({
   const wikiNavigationRef = useRef(0)
   const wikiScrollCleanupRef = useRef<() => void>(() => {})
   const [mermaidEpoch, setMermaidEpoch] = useState(0)
+
+  // Per-block click-to-edit: the rendered block is hidden and a small editor
+  // is mounted in its place. Writes go through the same revision-safe
+  // `editContent` path as the full editor, so no edit capability is lost.
+  interface BlockEditingSession {
+    startLine: number
+    endLine: number
+    source: string
+  }
+  const contentRef = useRef(content)
+  contentRef.current = content
+  const [editing, setEditing] = useState<BlockEditingSession | null>(null)
+  const editingRef = useRef<BlockEditingSession | null>(null)
+  const editorMountRef = useRef<HTMLDivElement | null>(null)
+  const editorRootRef = useRef<Root | null>(null)
+  const hiddenBlockRef = useRef<HTMLElement | null>(null)
+  const pendingRefreshRef = useRef(false)
+  const [refreshEpoch, setRefreshEpoch] = useState(0)
+  const canEditBlocks = editable && Boolean(sourceNoteId)
+
+  const teardownBlockEditor = useCallback(() => {
+    editorRootRef.current?.unmount()
+    editorRootRef.current = null
+    editorMountRef.current?.remove()
+    editorMountRef.current = null
+    const hidden = hiddenBlockRef.current
+    hiddenBlockRef.current = null
+    if (hidden && hostRef.current?.contains(hidden)) hidden.style.display = ''
+    editingRef.current = null
+    setEditing(null)
+    if (pendingRefreshRef.current) {
+      pendingRefreshRef.current = false
+      setRefreshEpoch((epoch) => epoch + 1)
+    }
+  }, [])
+
+  const commitBlockEdit = useCallback((draft: string) => {
+    const session = editingRef.current
+    if (!session) return
+    if (!sourceNoteId) {
+      teardownBlockEditor()
+      return
+    }
+    const latest = contentRef.current
+    if (latest !== session.source) {
+      toast({ title: t("preview.the_preview_is_updating_try_again_in_a_moment"), tone: 'warning' })
+      return
+    }
+    const next = replaceBlockLines(latest, session.startLine, session.endLine, draft)
+    teardownBlockEditor()
+    if (next !== latest) editContent(sourceNoteId, next)
+  }, [editContent, sourceNoteId, teardownBlockEditor, toast])
+
+  const cancelBlockEdit = useCallback(() => {
+    teardownBlockEditor()
+  }, [teardownBlockEditor])
+
+  const openBlockEditor = useCallback((block: HTMLElement | null, startLine: number) => {
+    const host = hostRef.current
+    if (!host || !sourceNoteId || editingRef.current) return
+    const source = contentRef.current
+    const total = countContentLines(source)
+    const endLine = block ? resolveBlockEnd(collectBlockStartLines(host), startLine, total) : 0
+    const session: BlockEditingSession = { startLine, endLine, source }
+    const mount = document.createElement('div')
+    mount.setAttribute('data-block-editor-mount', '')
+    if (block) {
+      hiddenBlockRef.current = block
+      block.style.display = 'none'
+      block.before(mount)
+    } else {
+      host.appendChild(mount)
+    }
+    editingRef.current = session
+    setEditing(session)
+    editorMountRef.current = mount
+    const root = createRoot(mount)
+    editorRootRef.current = root
+    root.render(
+      <BlockEditor
+        initialValue={sliceBlockLines(source, startLine, endLine)}
+        onSave={commitBlockEdit}
+        onCancel={cancelBlockEdit}
+      />,
+    )
+  }, [cancelBlockEdit, commitBlockEdit, sourceNoteId])
+
+  const startBlankBlockEdit = useCallback(() => {
+    openBlockEditor(null, 0)
+  }, [openBlockEditor])
+
+  useEffect(() => () => {
+    editorRootRef.current?.unmount()
+    editorRootRef.current = null
+    editorMountRef.current?.remove()
+    editorMountRef.current = null
+    const hidden = hiddenBlockRef.current
+    hiddenBlockRef.current = null
+    if (hidden) hidden.style.display = ''
+  }, [])
 
 
   const htmlObj = useMemo(() => ({ __html: committedHtml }), [committedHtml])
@@ -137,6 +251,12 @@ export const Preview = memo(function Preview({
 
 
   useEffect(() => {
+    // While a block is being edited the preview DOM hosts the editor mount;
+    // defer re-rendering so the draft is never wiped, then refresh on close.
+    if (editingRef.current) {
+      pendingRefreshRef.current = true
+      return
+    }
     const revision = ++preparationRef.current
     let cancelled = false
 
@@ -161,6 +281,13 @@ export const Preview = memo(function Preview({
       })
       if (cancelled || revision !== preparationRef.current) return
 
+      // An editor opened while this prepare was in flight: never wipe its
+      // DOM node, defer the refresh until the editor closes instead.
+      if (editingRef.current) {
+        pendingRefreshRef.current = true
+        return
+      }
+
       restorePreviewInteractionState(staging, capturePreviewInteractionState(hostRef.current))
 
       const nextHtml = staging.innerHTML
@@ -183,6 +310,7 @@ export const Preview = memo(function Preview({
   }, [
     debounced,
     embedContextTitle,
+    refreshEpoch,
     rendered.hasEmbeds,
     rendered.html,
     scrollerRef,
@@ -219,6 +347,9 @@ export const Preview = memo(function Preview({
 
   const onClick = (event: React.MouseEvent) => {
     const target = event.target as HTMLElement
+
+    // Clicks inside the in-place block editor belong to the editor.
+    if (target.closest('[data-block-editor]')) return
 
     const mermaidRetry = target.closest<HTMLElement>('[data-mermaid-retry]')
     if (mermaidRetry) {
@@ -364,6 +495,29 @@ export const Preview = memo(function Preview({
       }
       const heading = hostRef.current?.querySelector(`#${CSS.escape(id)}`)
       heading?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' })
+      return
+    }
+
+    // Reading view stays readable by default; a plain click on a rendered
+    // block opens it for editing right in place. Focus leaving the editor
+    // (save on blur, cancel on Escape) restores the read appearance.
+    if (
+      canEditBlocks &&
+      !editingRef.current &&
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      if (window.getSelection()?.toString()) return
+      if (isInteractivePreviewTarget(target)) return
+      const host = hostRef.current
+      if (!host) return
+      const block = findEditableBlock(host, target)
+      if (!block) return
+      const startLine = Number(block.dataset.line)
+      if (!Number.isInteger(startLine) || startLine < 0) return
+      openBlockEditor(block, startLine)
     }
   }
 
@@ -396,9 +550,20 @@ export const Preview = memo(function Preview({
         onKeyDown={onKeyDown}
         data-font={settings.appearance.proseFont}
         data-preview-content
+        data-editable-blocks={canEditBlocks || undefined}
+        title={canEditBlocks ? t("preview.click_to_edit_block") : undefined}
         className="ink-prose"
         dangerouslySetInnerHTML={htmlObj}
       />
+      {canEditBlocks && !editing && !debounced.trim() && (
+        <button
+          type="button"
+          onClick={startBlankBlockEdit}
+          className="mx-auto mb-[42vh] block rounded-[var(--r-md)] border border-dashed border-[var(--border-default)] px-4 py-3 text-[13px] text-[var(--text-tertiary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        >
+          {t("editor.start_writing")}
+        </button>
+      )}
     </div>
   )
 })

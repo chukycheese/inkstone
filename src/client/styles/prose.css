@@ -997,6 +997,19 @@
 }
 
 
+.ink-prose[data-editable-blocks] > [data-line] {
+  border-radius: var(--r-md);
+}
+
+@media (hover: hover) {
+  .ink-prose[data-editable-blocks] > [data-line] {
+    cursor: pointer;
+  }
+  .ink-prose[data-editable-blocks] > [data-line]:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
 @media print {
   .ink-prose {
     max-width: none;
