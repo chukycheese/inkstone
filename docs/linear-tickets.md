@@ -117,3 +117,35 @@
   - `00 Inbox` 내 `status: distilled` & `archived: false` 14건 일괄 아카이브 (`rev 2→3` 6건, `rev 4→5` 8건)
   - 대상: freecodecamp/oreilly/mattpaige/팟캐스트 4건/seattledataguy/openai/lint 리포트/scientificdiscovery/datadog/sundayletters 등
 - 검증: 14건 모두 `ok`, Inbox 잔여는 `rev 1` EDR 등 미처리 5건 정도
+
+---
+
+## 9) CKCZ-45 · [Maintenance] Upstream Inkstone v0.8.0 릴리즈 및 신규 커밋 병합
+- URL: https://linear.app/chukycheese/issue/CKCZ-45
+- 상태: **Done** (`260d416`) · 라벨: `Improvement`
+
+**작업:**
+- 원본 저장소(`shuaiplus/inkstone`) v0.8.0 릴리즈 및 신규 14개 커밋 병합
+- `src/worker/db/schema.ts`의 스키마 마이그레이션 충돌 해결 (`push_subscriptions`를 version 14로 분리, 원본 `backup_archives` version 13 유지)
+- 주요 기능: 에디터 플로팅 찾기/바꾸기 패널, 캘린더 스케줄 백업/보존 정책, 오프라인 충돌 분리 보존 등 반영
+- 타입체크 및 테스트 스위트 검증 통과
+
+---
+
+## 10) CKCZ-46 · [Knowledge Base] 00 Inbox 문서 115건 일괄 정리 및 분류/아카이브
+- URL: https://linear.app/chukycheese/issue/CKCZ-46
+- 상태: **Done**
+
+**작업:**
+- `00 Inbox` 누적 115건 문서 전면 정리:
+  - 매일 생성된 일일 `LLM Wiki Lint Report` 29건 일괄 아카이브 (`is_archived = 1`)
+  - Distill(Wiki 요약) 완료 문서 23건 주제별 적정 폴더로 이동:
+    - `AI·Agents` (7건): Google Foresight, Hex Data Agent, Agentic Data Stack 등
+    - `Data` (3건): Semantic Layer 관련 최신 아티클
+    - `02 Papers` (3건): arXiv DAG-FM, Bayesian 확인 이론, AMS PDF 등
+    - `10 English` (2건): IELTS Speaking 팟캐스트
+    - `08 Workout` (1건): 운동 인스타그램
+    - `05 Resources` (8건): YouTube 기술 세미나 및 기타 자료
+  - 깨진 캡처(broken/svg-only 10건, 404 에러 3건), 테스트/더미 노트(8건), 빈 노트(2건) 총 23건 휴지통(`deleted_at`) 정리
+- `00 Inbox` 활성 잔여 노트: 0건 달성 (Inbox Zero)
+
