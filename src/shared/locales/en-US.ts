@@ -1,4 +1,42 @@
 export const EN_US_MESSAGES = {
+    "editor.search.find": "Find",
+    "editor.search.replace": "Replace",
+    "editor.search.find_in_note": "Find in this note",
+    "editor.search.replace_in_note": "Replace in this note",
+    "editor.search.find_placeholder": "Find in this note…",
+    "editor.search.replace_placeholder": "Replace with… (leave empty to delete)",
+    "editor.search.previous": "Previous match (Shift+Enter)",
+    "editor.search.next": "Next match (Enter)",
+    "editor.search.close": "Close search (Esc)",
+    "editor.search.resize": "Resize search: drag left/down to enlarge, or use arrow keys",
+    "editor.search.replace_all": "Replace all",
+    "editor.search.undo": "Undo replacement",
+    "editor.search.undone": "Replacement undone.",
+    "editor.search.match_case": "Match case",
+    "editor.search.whole_word": "Whole words",
+    "editor.search.regexp": "Regular expression",
+    "editor.search.escapes": "Use \\n, \\t escapes",
+    "editor.search.in_selection": "In selection",
+    "editor.search.selection_hint": "Select text before opening search to limit the search range.",
+    "editor.search.selection_scope": "Selected text",
+    "editor.search.note_scope": "Current note",
+    "editor.search.count": "{current} / {total}",
+    "editor.search.match_count": "{count} matches",
+    "editor.search.start_hint": "Enter text to find. Enter: next · Shift+Enter: previous",
+    "editor.search.no_matches": "No matches found. Try different text or search options.",
+    "editor.search.invalid_regexp": "Invalid regular expression. Check the pattern.",
+    "editor.search.imprecise": "This match covers part of a normalized character and cannot be replaced safely.",
+    "editor.search.replaced": "Replaced {count} matches.",
+    "editor.search.wrapped_start": "Reached the end. Continued from the beginning.",
+    "editor.search.wrapped_end": "Reached the beginning. Continued from the end.",
+    "editor.search.results": "Search results",
+    "editor.search.result_line": "Line {line}",
+    "editor.search.empty_match": "Empty match",
+    "editor.search.results_limit": "Showing the first {count} results. Use previous/next to reach every match.",
+    "navigation.note_views": "Note views",
+    "navigation.close_list": "Close note list",
+    "navigation.searching": "Searching…",
+    "navigation.local_search_only": "Search is unavailable. Showing local matches.",
     "mobile.account": "Me",
     "mobile.view": "View",
     "mobile.menu": "Menu",
@@ -117,6 +155,16 @@ export const EN_US_MESSAGES = {
     "command.insert_tag_autocomplete": "Insert tag (autocomplete)",
     "command.jump_to_the_next_cell_in_the_table": "Jump to the next cell in the table",
     "command.keyboard_shortcuts": "Keyboard shortcuts",
+    "command.indent": "Increase indentation",
+    "command.outdent": "Decrease indentation",
+    "command.select_next_occurrence": "Select next matching text",
+    "command.shortcut_scope_hint": "Formatting and text editing shortcuts apply in the note editor. {shortcut} moves a note to trash only when the note list has focus.",
+    "command.note_list": "Note list",
+    "command.navigate_notes": "Navigate notes",
+    "command.navigate_menu": "Navigate menu or search results",
+    "command.confirm_choice": "Confirm selection",
+    "command.close_overlay": "Close menu or dialog",
+    "command.menu_navigation": "Menus and dialogs",
     "command.keyboard_shortcuts_021cf9": "Keyboard shortcuts",
     "command.layout_editor_only": "Layout: Editor only",
     "command.layout_preview_only": "Layout: Preview only",
@@ -575,6 +623,15 @@ export const EN_US_MESSAGES = {
     "settings.created_value0_updated_value1_skipped_value2_restored_value3_attachments": "Created {value0}, updated {value1}, skipped {value2}, restored {value3} attachments, and skipped {value4} attachments",
     "settings.current_password": "Current password",
     "settings.daily": "Daily",
+    "settings.weekly": "Weekly",
+    "settings.monthly": "Monthly",
+    "settings.yearly": "Yearly",
+    "settings.backup_retention": "Copies to keep",
+    "settings.backup_retention_description": "Applied separately to each target. Excess copies are removed only after a new backup succeeds. Only backups tracked by this app after enabling this feature are cleaned up; manual backups also count.",
+    "settings.keep_all_backups": "Keep all",
+    "settings.keep_latest_backups": "Keep latest {count}",
+    "settings.backup_cleanup_warning": "Backup succeeded, but old copies could not be cleaned up:",
+    "backup.service.cleanup_pending": "More old copies remain. Cleanup will continue after the next successful backup.",
     "settings.dark": "Dark",
     "settings.data": "Data",
     "settings.delay_before_uploading_after_you_stop_typing_shorter_makes_more_requests": "How long to wait after you stop typing before saving",
@@ -1042,11 +1099,22 @@ export const EN_US_MESSAGES = {
     "time.yesterday": "Yesterday",
       "workspace.reading_mode": "Reading mode",
   "workspace.live_preview": "Live preview",
+  "workspace.editing_mode": "Editing mode",
   "workspace.live_preview_hint": "Click to edit; move the cursor away to render. Ctrl / ⌘ + click to open links",
   "workspace.a_snapshot_is_saved_every_few_minutes_or_after_larger_edits": "A snapshot is saved every few minutes or after larger edits",
     "workspace.autosave_for_value0": "Autosave for “{value0}”",
     "workspace.back_to_notes": "Back to notes",
     "workspace.block_id": "Block ID",
+    "workspace.paragraph": "Body text",
+    "workspace.upload_image": "Upload image",
+    "workspace.block_math": "Block formula",
+    "workspace.front_matter": "Note properties (YAML)",
+    "workspace.hidden_comment": "Hidden comment",
+    "workspace.links_and_references": "Links and references",
+    "workspace.note_tools": "Note tools",
+    "workspace.code_and_diagrams": "Code and diagrams",
+    "workspace.content_blocks": "Content blocks",
+    "workspace.formatting_tools": "Formatting tools",
     "workspace.block_reference": "Block reference",
     "workspace.callout": "Callout",
     "workspace.characters": " characters",
@@ -1127,7 +1195,7 @@ Organize notes on the left. Choose live preview to edit content in place, split 
 - [ ] Click this checkbox and see its state saved
   - [ ] Nested tasks update their exact source line too
 - [ ] Select text and press \`Ctrl + B\` to make it bold
-- [ ] Press \`Ctrl + K\` to open the command palette
+- [ ] Press \`Ctrl + Shift + P\` to open the command palette
 - [ ] Add a \`#tag\`, or click [[My first note]] to create a linked note
 - [ ] Click the title above this note and give it a name different from the body
 - [ ] Create a subfolder, then drag it into another folder or sibling position
@@ -1147,16 +1215,17 @@ Organize notes on the left. Choose live preview to edit content in place, split 
 
 | Shortcut | Action |
 | --- | --- |
-| \`Ctrl + K\` | Open the command palette |
-| \`Ctrl + P\` | Quickly open a note |
-| \`Ctrl + N\` | Create a note |
+| \`Ctrl + Shift + P\` | Open the command palette |
+| \`Ctrl + Alt + N\` | Create a note |
 | \`Ctrl + Shift + F\` | Search all notes |
 | \`Ctrl + ,\` | Open settings |
 | \`Ctrl + \\\` | Cycle editor, split, and preview layouts |
 | \`Ctrl + S\` | Save now; normal edits save automatically |
 | \`Ctrl + B / I / E\` | Bold, italic, and inline code |
-| \`Ctrl + 1…6\` | Set heading levels one through six |
-| \`Shift + ?\` | Show every shortcut |
+| \`Ctrl + Alt + 1…6\` | Set heading levels one through six |
+| \`Ctrl + Alt + 0\` | Restore body text |
+| \`Ctrl + K\` | Insert a link in the editor |
+| \`Ctrl + Shift + /\` | Show every shortcut |
 
 ## Why it works for long-term notes
 
