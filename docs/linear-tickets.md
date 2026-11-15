@@ -149,3 +149,17 @@
   - 깨진 캡처(broken/svg-only 10건, 404 에러 3건), 테스트/더미 노트(8건), 빈 노트(2건) 총 23건 휴지통(`deleted_at`) 정리
 - `00 Inbox` 활성 잔여 노트: 0건 달성 (Inbox Zero)
 
+---
+
+## 11) CKCZ-47 · [Maintenance] 테스트 스위트 최신화 및 Inbox Zero 유지 정리 — 2026-11-15
+- 상태: **Done** (`91aef60`) · 라벨: `Maintenance`
+
+**작업:**
+- **단위 테스트 정상화**: Node v26 환경에서 `SettingsPanel.test.ts`의 `localStorage` 누락 오류를 모킹하여 41개 테스트 파일(271개 전체 테스트) 100% 통과 복구
+- **00 Inbox 정리 (Inbox Zero 재달성)**:
+  - `Comet: Train a Decision Model (LLM-as-a-Judge)` 노트 제목 부여 및 `AI·Agents` 폴더로 분류 이동
+  - Cloudflare 봇 감지 페이지만 캡처된 Wiley 문서 휴지통(`deleted_at`) 정리
+  - 최근 8일간 자동 생성된 일일 `LLM Wiki Lint Report` 8건 일괄 아카이브
+- **검증**: `00 Inbox` 활성 잔여 노트 0건 달성 (`active_inbox_count: 0`)
+
+
