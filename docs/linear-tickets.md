@@ -151,7 +151,7 @@
 
 ---
 
-## 11) CKCZ-47 · [Maintenance] 테스트 스위트 최신화 및 Inbox Zero 유지 정리 — 2026-11-15
+## 11) [Maintenance] 테스트 스위트 최신화 및 Inbox Zero 유지 정리 — 2026-11-15
 - 상태: **Done** (`91aef60`) · 라벨: `Maintenance`
 
 **작업:**
@@ -161,5 +161,47 @@
   - Cloudflare 봇 감지 페이지만 캡처된 Wiley 문서 휴지통(`deleted_at`) 정리
   - 최근 8일간 자동 생성된 일일 `LLM Wiki Lint Report` 8건 일괄 아카이브
 - **검증**: `00 Inbox` 활성 잔여 노트 0건 달성 (`active_inbox_count: 0`)
+
+---
+
+## 12) CKCZ-47 · [CI/Lint] check-i18n 및 check-comments 검증 스크립트 불일치 정상화
+- URL: https://linear.app/chukycheese/issue/CKCZ-47
+- 상태: **Todo** · 라벨: `Bug` / `CI`
+
+**내용:**
+- `npm run i18n:check` 실행 시 `tests/note-content-limit.test.ts`의 한자(中) 문자로 인해 실패하는 현상 해결
+- `npm run comments:check` 실행 시 주석 검사 allowlist 누락 282건 정리
+- CI 사전 검증 스크립트 전체 통과 복구
+
+---
+
+## 13) CKCZ-48 · [AI] Cloudflare Workers AI ↔ NVIDIA NIM 3차 Failover 결합
+- URL: https://linear.app/chukycheese/issue/CKCZ-48
+- 상태: **Todo** · 라벨: `Feature` / `AI`
+
+**내용:**
+- 위키 Distill / Query / Vocab 기능이 Cloudflare Workers AI에만 의존하여 무료 쿼터 초과 시 다운타임 발생 위험
+- `src/worker/lib/ai-chat.ts`에 NVIDIA NIM API(`https://integrate.api.nvidia.com/v1`) 자동 Failover 안전망 구축
+
+---
+
+## 14) CKCZ-49 · [Knowledge Base] 고아 노트(Orphan Note) 및 미해결 위키링크 점검/해소
+- URL: https://linear.app/chukycheese/issue/CKCZ-49
+- 상태: **Todo** · 라벨: `Knowledge Base`
+
+**내용:**
+- 원격 D1의 LLM Wiki Lint Report에서 고아 노트 1건(제목 누락 `[[]]`), 미해결 위키링크 2건 보고됨
+- 지식 그래프 정합성을 위해 고아 노트 정리 및 미해결 링크 해소
+
+---
+
+## 15) CKCZ-50 · [Git] 로컬 커밋 upstream/main 동기화 및 원격 푸시
+- URL: https://linear.app/chukycheese/issue/CKCZ-50
+- 상태: **Todo** · 라벨: `Maintenance`
+
+**내용:**
+- 로컬 `main` 브랜치에 단위 테스트 정상화 커밋 및 문서화 커밋 동기화
+- `upstream/main`으로 `git push` 실행 및 원격 상태 확인
+
 
 
