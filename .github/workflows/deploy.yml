@@ -1,0 +1,67 @@
+name: Deploy
+
+# CKCZ-39: build and ship Inkstone to Cloudflare Workers.
+# Pushes to main run the release checks, then deploy. Pull requests run the
+# same checks only, so broken changes never reach the production Worker.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deploys race for the same ref; a newer push supersedes an
+# in-flight one. PR check runs are independent and can proceed in parallel.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Release checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Mirrors the "Required checks" list in CONTRIBUTING.md.
+      - run: npm run typecheck
+      - run: npm run i18n:check
+      - run: npm run comments:check
+      - run: npm run test:unit
+
+  deploy:
+    name: Deploy to Cloudflare Workers
+    needs: verify
+    # Only deploy on main (push or manual dispatch); never on pull_request.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run build` produces dist/client (assets) and dist/inkstone
+      # (bundled Worker + generated wrangler.json) used by the deploy below.
+      - run: npm run build
+
+      - name: Publish Worker and assets
+        run: npx wrangler deploy --config dist/inkstone/wrangler.json
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

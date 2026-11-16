@@ -45,6 +45,26 @@ field to a stable SemVer value such as `0.2.0` only when that version is ready
 to be announced to existing installations. Do not use a `v` prefix or a
 prerelease identifier.
 
+## Continuous deployment
+
+`.github/workflows/deploy.yml` builds and deploys to Cloudflare Workers. Every
+push to `main` runs the required checks, then publishes; pull requests run the
+same checks without deploying.
+
+One-time setup:
+
+1. Create a Cloudflare API token with the **Edit Cloudflare Workers** template
+   (Workers Scripts, KV, D1, R2, and Durable Objects edit access).
+2. Copy the target account ID from the Cloudflare dashboard.
+3. Add both as repository secrets under **Settings → Secrets and variables →
+   Actions**:
+   - `CLOUDFLARE_API_TOKEN` — the token from step 1
+   - `CLOUDFLARE_ACCOUNT_ID` — the account ID from step 2
+
+Runtime secrets (for example MCP tokens or push keys) are stored on the Worker
+with `wrangler secret put <NAME>` and are not read by the workflow, so a deploy
+never overwrites them.
+
 ## Pull requests
 
 Describe the user-visible outcome, important compatibility effects, security implications, and the exact checks you ran. Include screenshots for interface changes and explain narrow-screen behavior when layout is affected.
