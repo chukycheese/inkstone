@@ -21,6 +21,12 @@ const EMBED_TEXT_MAX_CHARS = 4_000
  * loads every candidate vector into memory to score it, so each MCP/HTTP
  * search read up to 8k rows; 2k keeps recall for personal-size libraries
  * while cutting the worst case 4x.
+ *
+ * The ceiling applies to a cold load only: candidates are cached per isolate
+ * (see `loadSemanticCandidates`) and refreshed from `MAX(indexed_at)`, so a
+ * search normally re-reads just the vectors indexed since the previous one.
+ * The newest 2,000 vectors are kept, which is what an order-by-recency window
+ * of this size means for accounts above the ceiling.
  */
 export const MAX_SEMANTIC_VECTORS = 2_000
 const SEMANTIC_TOP_K = 40
@@ -54,15 +60,6 @@ interface QueueRow {
   note_id: string
   kind: AiIndexKind
   created_at: number
-}
-
-interface EmbeddingRow {
-  id: string
-  title: string
-  excerpt: string
-  rev: number
-  updated_at: number
-  vector: ArrayBuffer
 }
 
 export interface SemanticFilters {
@@ -152,6 +149,21 @@ export function noteIndexQueueStatement(
   return kind === 'embed'
     ? statement.bind(userId, noteId, kind, now, aiSearchPrefKey(userId))
     : statement.bind(userId, noteId, kind, now)
+}
+
+/**
+ * True when a write leaves the embedded text (title plus the head of the body)
+ * unchanged, so the note does not have to be queued for embedding again. A
+ * long note edited past that head keeps its vector, which is what the previous
+ * drain would have computed for it anyway.
+ */
+export function embedTextUnchanged(
+  previous: { title: string; content: string },
+  next: { title: string; content: string },
+): boolean {
+  const key = (note: { title: string; content: string }) =>
+    `${note.title}\n${note.content}`.slice(0, EMBED_TEXT_MAX_CHARS)
+  return key(previous) === key(next)
 }
 
 export function aiDeleteNeededSql(userId: string, noteId: string): string {
@@ -318,9 +330,74 @@ async function processQueueItem(env: Env, userId: string, item: QueueRow): Promi
 }
 
 /**
+ * How many scored candidates are hydrated with note metadata. The window is
+ * twice the result size so the `updated_at` tie-break still sees every note
+ * that can reach the result list.
+ */
+const SEMANTIC_HYDRATE_CANDIDATES = SEMANTIC_TOP_K * 2
+
+/**
+ * Candidate-cache tunables. The cache holds decoded vectors per account and
+ * filter combination inside one isolate; `MAX(indexed_at)` validates it, so a
+ * TTL only bounds how long an unused entry may keep its memory.
+ */
+export const SEMANTIC_CACHE_IDLE_TTL_MS = 5 * 60_000
+export const SEMANTIC_CACHE_MAX_ENTRIES = 4
+export const SEMANTIC_CACHE_MAX_BYTES = 24 * 1024 * 1024
+/** Rows re-read to refresh a cached candidate set before falling back to a full load. */
+export const SEMANTIC_CACHE_DELTA_ROWS = 200
+
+interface SemanticCandidate {
+  id: string
+  vector: Float32Array
+  indexedAt: number
+}
+
+interface SemanticCandidateEntry {
+  candidates: SemanticCandidate[]
+  version: number
+  usedAt: number
+  bytes: number
+}
+
+interface SemanticVectorRow {
+  note_id: string
+  vector: ArrayBuffer
+  indexed_at: number
+}
+
+interface SemanticNoteRow {
+  id: string
+  title: string
+  excerpt: string
+  rev: number
+  updated_at: number
+}
+
+const semanticCandidateCache = new Map<string, SemanticCandidateEntry>()
+
+/** Drops every cached candidate set; tests use it to isolate runs. */
+export function clearSemanticCandidateCache(): void {
+  semanticCandidateCache.clear()
+}
+
+/** Cache key for one account and filter combination. */
+export function semanticCacheKey(userId: string, filters: SemanticFilters): string {
+  const tags = [...new Set((filters.tags ?? []).map((tag) => tag.toLowerCase()))].sort()
+  const shape = [tags, filters.folder ?? null, filters.starred ?? null, filters.archived ?? null]
+  return `${userId}\u0000${JSON.stringify(shape)}`
+}
+
+/**
  * Semantic retrieval over the account's embedding index. Returns null when
  * AI is unavailable or the query embedding fails; the caller degrades to
  * lexical search.
+ *
+ * D1 cost per call, cheapest first: the account's vectors are pulled without
+ * a `notes` join and only for the columns the scorer reads, cached per isolate
+ * and refreshed from the rows indexed since the previous call; note metadata
+ * (title, excerpt, rev, updated_at) is then fetched for the shortlist that can
+ * reach the result window, not for every candidate vector.
  */
 export async function searchSemanticNotes(
   env: Env,
@@ -331,34 +408,279 @@ export async function searchSemanticNotes(
 ): Promise<SemanticSearchHit[] | null> {
   if (!env.AI || !await isAiSearchEnabled(db, userId)) return null
   const queryVector = await embedText(env.AI, query)
-  const { binds, where } = semanticWhere(userId, filters)
-  binds.push(MAX_SEMANTIC_VECTORS)
-  const { results } = await db.prepare(
-    `SELECT n.id, n.title, n.excerpt, n.rev, n.updated_at, e.vector
-       FROM ai_note_embeddings e JOIN notes n
-         ON n.id = e.note_id AND n.user_id = e.user_id
-      WHERE ${where}
-      LIMIT ?${binds.length}`,
-  ).bind(...binds).all<EmbeddingRow>()
-  if (!results.length) return []
+  const entry = await loadSemanticCandidates(db, userId, filters)
+  if (!entry.candidates.length) return []
 
-  const scored = results.map((row) => ({
-    row,
-    score: cosineSimilarity(queryVector, decodeVector(row.vector)),
+  const scored = entry.candidates.map((candidate) => ({
+    candidate,
+    score: cosineSimilarity(queryVector, candidate.vector),
   }))
   scored.sort((a, b) =>
     b.score - a.score ||
-    b.row.updated_at - a.row.updated_at ||
-    a.row.id.localeCompare(b.row.id),
+    a.candidate.id.localeCompare(b.candidate.id),
   )
-  return scored.slice(0, SEMANTIC_TOP_K).map(({ row, score }) => ({
-    id: row.id,
-    title: row.title,
-    excerpt: row.excerpt,
-    rev: row.rev,
-    updatedAt: row.updated_at,
-    score,
-  }))
+
+  const shortlist = scored
+    .slice(0, SEMANTIC_HYDRATE_CANDIDATES)
+    .map(({ candidate }) => candidate.id)
+  const notes = await hydrateSemanticNotes(db, userId, shortlist, filters)
+  const byId = new Map(notes.map((note) => [note.id, note]))
+
+  const hits: SemanticSearchHit[] = []
+  for (const { candidate, score } of scored) {
+    if (hits.length >= SEMANTIC_TOP_K) break
+    const note = byId.get(candidate.id)
+    if (!note) continue
+    hits.push({
+      id: note.id,
+      title: note.title,
+      excerpt: note.excerpt,
+      rev: note.rev,
+      updatedAt: note.updated_at,
+      score,
+    })
+  }
+  // `updated_at` tie-break, matching the previous ranking contract.
+  return hits.sort((a, b) =>
+    b.score - a.score ||
+    b.updatedAt - a.updatedAt ||
+    a.id.localeCompare(b.id),
+  )
+}
+
+/**
+ * Returns the account's candidates for these filters, reusing the isolate
+ * cache when `MAX(indexed_at)` shows nothing new and otherwise appending only
+ * the rows indexed since the cached snapshot.
+ */
+async function loadSemanticCandidates(
+  db: D1Database,
+  userId: string,
+  filters: SemanticFilters,
+): Promise<SemanticCandidateEntry> {
+  const key = semanticCacheKey(userId, filters)
+  const now = Date.now()
+  const version = await readSemanticVersion(db, userId)
+  const cached = semanticCandidateCache.get(key)
+  if (cached) {
+    if (cached.version === version) {
+      cached.usedAt = now
+      touchSemanticCache(key, cached)
+      return cached
+    }
+    if (version > cached.version) {
+      const delta = await readSemanticVectorRows(
+        db, userId, filters, cached.version, SEMANTIC_CACHE_DELTA_ROWS + 1,
+      )
+      if (delta.length <= SEMANTIC_CACHE_DELTA_ROWS) {
+        const merged = mergeSemanticCandidates(cached, delta, version, now)
+        storeSemanticCache(key, merged)
+        return merged
+      }
+    }
+  }
+  const rows = await readSemanticVectorRows(db, userId, filters, null, MAX_SEMANTIC_VECTORS)
+  const entry = buildSemanticCandidateEntry(rows, version, now)
+  storeSemanticCache(key, entry)
+  return entry
+}
+
+async function readSemanticVersion(db: D1Database, userId: string): Promise<number> {
+  const row = await db
+    .prepare(`SELECT MAX(indexed_at) AS version FROM ai_note_embeddings WHERE user_id = ?1`)
+    .bind(userId)
+    .first<{ version: number | null }>()
+  return row?.version ?? 0
+}
+
+/**
+ * Vector rows for one account, newest first. The account's notes are only
+ * joined when the query actually filters on note attributes, and then as an
+ * existence probe on the primary key — the candidate projection never carries
+ * note columns.
+ */
+async function readSemanticVectorRows(
+  db: D1Database,
+  userId: string,
+  filters: SemanticFilters,
+  since: number | null,
+  limit: number,
+): Promise<SemanticVectorRow[]> {
+  const binds: unknown[] = [userId]
+  let where = 'e.user_id = ?1'
+  if (hasSemanticFilters(filters)) {
+    const clause = noteFilterClause('n', filters, 2)
+    where += ` AND EXISTS (SELECT 1 FROM notes n
+      WHERE n.id = e.note_id AND n.user_id = e.user_id
+        AND n.deleted_at IS NULL${clause.sql})`
+    binds.push(...clause.binds)
+  }
+  if (since !== null) {
+    binds.push(since)
+    where += ` AND e.indexed_at >= ?${binds.length}`
+  }
+  binds.push(limit)
+  const { results } = await db
+    .prepare(
+      `SELECT e.note_id, e.vector, e.indexed_at FROM ai_note_embeddings e
+        WHERE ${where}
+        ORDER BY e.indexed_at DESC
+        LIMIT ?${binds.length}`,
+    )
+    .bind(...binds)
+    .all<SemanticVectorRow>()
+  return results
+}
+
+/** Note metadata for the shortlist only. */
+async function hydrateSemanticNotes(
+  db: D1Database,
+  userId: string,
+  ids: readonly string[],
+  filters: SemanticFilters,
+): Promise<SemanticNoteRow[]> {
+  if (!ids.length) return []
+  // ?1 is the account, ?2 the id list; filter placeholders follow them.
+  const clause = noteFilterClause('n', filters, 3)
+  const { results } = await db
+    .prepare(
+      `SELECT n.id, n.title, n.excerpt, n.rev, n.updated_at FROM notes n
+        WHERE n.user_id = ?1 AND n.deleted_at IS NULL
+          AND n.id IN (SELECT value FROM json_each(?2))${clause.sql}`,
+    )
+    .bind(userId, JSON.stringify(ids), ...clause.binds)
+    .all<SemanticNoteRow>()
+  return results
+}
+
+function buildSemanticCandidateEntry(
+  rows: readonly SemanticVectorRow[],
+  version: number,
+  usedAt: number,
+): SemanticCandidateEntry {
+  const candidates: SemanticCandidate[] = []
+  for (const row of rows) {
+    candidates.push({
+      id: row.note_id,
+      vector: decodeVector(row.vector),
+      indexedAt: row.indexed_at,
+    })
+  }
+  return { candidates, version, usedAt, bytes: semanticCandidatesBytes(candidates) }
+}
+
+/**
+ * Folds rows indexed since the cached snapshot into it. Rows already cached
+ * are replaced in place (re-embeds), new ones are merged by `indexed_at` so
+ * the newest `MAX_SEMANTIC_VECTORS` survive and the order stays newest-first.
+ */
+function mergeSemanticCandidates(
+  cached: SemanticCandidateEntry,
+  rows: readonly SemanticVectorRow[],
+  version: number,
+  usedAt: number,
+): SemanticCandidateEntry {
+  const byId = new Map(cached.candidates.map((candidate) => [candidate.id, candidate]))
+  for (const row of rows) {
+    byId.set(row.note_id, {
+      id: row.note_id,
+      vector: decodeVector(row.vector),
+      indexedAt: row.indexed_at,
+    })
+  }
+  const candidates = [...byId.values()]
+  candidates.sort((a, b) => b.indexedAt - a.indexedAt || a.id.localeCompare(b.id))
+  if (candidates.length > MAX_SEMANTIC_VECTORS) candidates.length = MAX_SEMANTIC_VECTORS
+  return {
+    candidates,
+    version,
+    usedAt,
+    bytes: semanticCandidatesBytes(candidates),
+  }
+}
+
+function semanticCandidatesBytes(candidates: readonly SemanticCandidate[]): number {
+  let bytes = 0
+  for (const candidate of candidates) bytes += candidate.vector.byteLength + candidate.id.length * 2
+  return bytes
+}
+
+function touchSemanticCache(key: string, entry: SemanticCandidateEntry): void {
+  semanticCandidateCache.delete(key)
+  semanticCandidateCache.set(key, entry)
+}
+
+function storeSemanticCache(key: string, entry: SemanticCandidateEntry): void {
+  touchSemanticCache(key, entry)
+  pruneSemanticCache(key, entry.usedAt)
+}
+
+/**
+ * Keeps the most recently used entries inside the entry-count and byte
+ * budgets, and drops entries untouched for `SEMANTIC_CACHE_IDLE_TTL_MS`.
+ */
+function pruneSemanticCache(keepKey: string, now: number): void {
+  let total = 0
+  for (const [key, entry] of semanticCandidateCache) {
+    if (now - entry.usedAt > SEMANTIC_CACHE_IDLE_TTL_MS && key !== keepKey) {
+      semanticCandidateCache.delete(key)
+      continue
+    }
+    total += entry.bytes
+  }
+  for (const key of [...semanticCandidateCache.keys()]) {
+    if (key === keepKey) continue
+    if (semanticCandidateCache.size <= SEMANTIC_CACHE_MAX_ENTRIES && total <= SEMANTIC_CACHE_MAX_BYTES) return
+    const entry = semanticCandidateCache.get(key)
+    if (!entry) continue
+    semanticCandidateCache.delete(key)
+    total -= entry.bytes
+  }
+}
+
+export function semanticCacheStats(): { entries: number; bytes: number } {
+  let bytes = 0
+  for (const entry of semanticCandidateCache.values()) bytes += entry.bytes
+  return { entries: semanticCandidateCache.size, bytes }
+}
+
+function hasSemanticFilters(filters: SemanticFilters): boolean {
+  return Boolean(
+    filters.starred === true ||
+    filters.archived === true ||
+    filters.archived === false ||
+    filters.folder ||
+    (filters.tags && filters.tags.length > 0),
+  )
+}
+
+/**
+ * Note-attribute filters over one alias, with placeholders starting at
+ * `start`. Shared by the candidate probe and the metadata hydration so both
+ * apply exactly the same filter contract.
+ */
+function noteFilterClause(
+  alias: string,
+  filters: SemanticFilters,
+  start: number,
+): { sql: string; binds: unknown[] } {
+  const binds: unknown[] = []
+  let sql = ''
+  if (filters.starred === true) sql += ` AND ${alias}.is_starred = 1`
+  if (filters.archived === true) sql += ` AND ${alias}.is_archived = 1`
+  else if (filters.archived === false) sql += ` AND ${alias}.is_archived = 0`
+  for (const tag of filters.tags ?? []) {
+    binds.push(tag)
+    sql += ` AND EXISTS (SELECT 1 FROM note_tags nt JOIN tags t ON t.id = nt.tag_id
+        WHERE nt.note_id = ${alias}.id AND t.user_id = ${alias}.user_id
+          AND t.name = ?${start + binds.length - 1} COLLATE NOCASE)`
+  }
+  if (filters.folder) {
+    binds.push(filters.folder)
+    sql += ` AND EXISTS (SELECT 1 FROM folders f WHERE f.id = ${alias}.folder_id
+        AND f.name = ?${start + binds.length - 1} COLLATE NOCASE AND f.user_id = ${alias}.user_id)`
+  }
+  return { sql, binds }
 }
 
 /**
@@ -450,22 +772,3 @@ export function semanticSnippet(excerpt: string, radius = 90): string {
   return truncateText(plain, radius * 2) + (plain.length > radius * 2 ? '…' : '')
 }
 
-function semanticWhere(userId: string, filters: SemanticFilters): { binds: unknown[]; where: string } {
-  const binds: unknown[] = [userId]
-  let where = `e.user_id = ?1 AND n.deleted_at IS NULL`
-  if (filters.starred === true) where += ' AND n.is_starred = 1'
-  if (filters.archived === true) where += ' AND n.is_archived = 1'
-  else if (filters.archived === false) where += ' AND n.is_archived = 0'
-  for (const tag of filters.tags ?? []) {
-    binds.push(tag)
-    where += ` AND EXISTS (SELECT 1 FROM note_tags nt JOIN tags t ON t.id = nt.tag_id
-        WHERE nt.note_id = n.id AND t.user_id = n.user_id
-          AND t.name = ?${binds.length} COLLATE NOCASE)`
-  }
-  if (filters.folder) {
-    binds.push(filters.folder)
-    where += ` AND EXISTS (SELECT 1 FROM folders f WHERE f.id = n.folder_id
-        AND f.name = ?${binds.length} COLLATE NOCASE AND f.user_id = n.user_id)`
-  }
-  return { binds, where }
-}

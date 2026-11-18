@@ -6,6 +6,7 @@ import { duplicateNoteTitle } from '@shared/text-utils';
 import { LIMITS } from '@shared/constants';
 import type { AppLocale, Folder, Note, NoteSummary, SortKey, SortOrder, SyncResponse, Tag, ViewKind, } from '@shared/types';
 import { api, ApiError, CLIENT_ID } from '../lib/api';
+import { autosaveDelayMs } from '../lib/autosave';
 import { localDb, publishBroadcast, type BroadcastPayload, type OutboxItem } from '../lib/db';
 import { folderDescendantIds } from '../lib/folders';
 import { useSession } from './session';
@@ -1352,7 +1353,10 @@ function stageNoteTextWrite(id: string, content: string, title: string | undefin
         updatedAt,
         writeId,
     });
-    const delay = Math.max(100, useSession.getState().settings.editor.autoSaveDelay);
+    const delay = autosaveDelayMs(
+        useSession.getState().settings.editor.autoSaveDelay,
+        content.length,
+    );
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => void get().flush(), delay);
 }

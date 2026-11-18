@@ -4,7 +4,7 @@ import { segmentCJK, toPlainText, wikiNoteTarget } from '@shared/markdown-utils'
 import { sliceText, truncateText } from '@shared/text-utils'
 import type { GraphResponse, SearchHit, SearchResponse } from '@shared/types'
 import type { AppBindings } from '../env'
-import { drainFtsQueue, hasPendingFtsWork, rebuildFtsIndex } from '../db/fts'
+import { drainFtsQueue, pendingFtsNoteIds, rebuildFtsIndex } from '../db/fts'
 import { NOTE_COLUMNS, toNoteSummary, type NoteRow } from '../db/rows'
 import { ApiError } from '../lib/errors'
 import { isValidId } from '../lib/id'
@@ -30,6 +30,13 @@ export const SEARCH_ROUTE_MAX_LIMIT = 50
 /** LIKE fallback over-fetch multiplier cap (was `limit * 3` up to 600). */
 export const LIKE_CANDIDATE_MULTIPLIER = 2
 export const LIKE_CANDIDATE_HARD_CAP = 100
+/**
+ * How many notes whose FTS entry is still settling are read straight from
+ * `notes` to supplement an FTS result. Past this window the queue is treated
+ * as a genuinely stale index (bulk import, fresh database) and the LIKE scan
+ * takes over.
+ */
+export const PENDING_FTS_MERGE_MAX = 8
 
 /**
  * Common English + Korean words with no retrieval signal. A query made only
@@ -178,10 +185,18 @@ export async function searchUserNotes(
   // noise — skip MATCH and let likeSearch do a bounded title-only scan.
   const stopwordOnly = isStopwordOnlyQuery(query)
   let useFts = ftsEnabled && !stopwordOnly
+  let pendingIds: string[] = []
   if (useFts) {
     try {
-      if (drain) await drainFtsQueue(db, userId, 50, true)
-      useFts = !(await hasPendingFtsWork(db, userId))
+      // Settled rows only: a note that changed moments ago is read below rather
+      // than re-indexed here, so a search never triggers a whole-note re-index.
+      if (drain) await drainFtsQueue(db, userId, 50)
+      // A note queued for re-index is usually the one being written right
+      // now. Reading those few notes directly keeps search current without
+      // dropping to the full-table LIKE scan for a stale queue entry.
+      const pending = await pendingFtsNoteIds(db, userId, PENDING_FTS_MERGE_MAX)
+      if (pending.truncated) useFts = false
+      else pendingIds = pending.ids
     } catch {
       useFts = false
     }
@@ -189,8 +204,11 @@ export async function searchUserNotes(
 
   if (useFts && query.terms.length && !query.trash) {
     try {
+      const hits = await ftsSearch(db, userId, query, Math.min(limit, FTS_MAX_LIMIT))
       return {
-        results: await ftsSearch(db, userId, query, Math.min(limit, FTS_MAX_LIMIT)),
+        results: pendingIds.length
+          ? await mergePendingFtsHits(db, userId, query, hits, pendingIds, limit)
+          : hits,
         mode: 'fts',
         query,
       }
@@ -360,6 +378,68 @@ async function likeSearch(
     note: toNoteSummary(row),
     snippet: makeSnippet(row.content, q.terms),
     score,
+  }))
+}
+
+/**
+ * Adds hits from the notes still queued for FTS indexing to an FTS result.
+ * Only those note ids are scanned, so a note that is one settle window behind
+ * the index still answers the query without the whole-table LIKE fallback.
+ */
+async function mergePendingFtsHits(
+  db: D1Database,
+  userId: string,
+  q: ParsedQuery,
+  hits: SearchHit[],
+  ids: readonly string[],
+  limit: number,
+): Promise<SearchHit[]> {
+  const extra = await pendingNoteHits(db, userId, q, ids, limit)
+  if (!extra.length) return hits
+  const seen = new Set(hits.map((hit) => hit.note.id))
+  const merged = [...hits]
+  for (const hit of extra) {
+    if (seen.has(hit.note.id)) continue
+    seen.add(hit.note.id)
+    merged.push(hit)
+  }
+  return merged.slice(0, limit)
+}
+
+/** LIKE match restricted to the given note ids. */
+async function pendingNoteHits(
+  db: D1Database,
+  userId: string,
+  q: ParsedQuery,
+  ids: readonly string[],
+  limit: number,
+): Promise<SearchHit[]> {
+  if (!ids.length || !q.terms.length) return []
+  const binds: unknown[] = [userId, JSON.stringify(ids)]
+  let where = `n.user_id = ?1 AND n.deleted_at IS NULL
+    AND n.id IN (SELECT value FROM json_each(?2))`
+  for (const term of q.terms) {
+    binds.push(`%${escapeLike(term)}%`)
+    const index = binds.length
+    where += ` AND (n.title LIKE ?${index} ESCAPE '\\' OR n.content LIKE ?${index} ESCAPE '\\')`
+  }
+  applyFilters(q, binds, (clause) => (where += clause))
+  binds.push(q.terms[0]!)
+  const contentWindow = contentWindowSql(binds.length)
+  binds.push(limit)
+  const { results } = await db
+    .prepare(
+      `SELECT ${NOTE_COLUMNS}, ${contentWindow} AS content FROM notes n
+        WHERE ${where}
+        ORDER BY n.updated_at DESC, n.id ASC
+        LIMIT ?${binds.length}`,
+    )
+    .bind(...binds)
+    .all<NoteRow & { content: string }>()
+  return results.map((row) => ({
+    note: toNoteSummary(row),
+    snippet: makeSnippet(row.content ?? '', q.terms),
+    score: scoreOf(row, q.terms),
   }))
 }
 

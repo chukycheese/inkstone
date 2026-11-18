@@ -210,6 +210,33 @@ export async function hasPendingFtsWork(db: D1Database, userId: string): Promise
   return row?.pending === 1
 }
 
+/**
+ * Most recently queued notes, newest first. A search uses the ids to read the
+ * few notes whose index entry is still settling straight from `notes` instead
+ * of abandoning FTS for a full-table LIKE scan.
+ *
+ * `truncated` means there are more queued notes than the window asked for —
+ * the index is genuinely behind (bulk import, fresh database) and the caller
+ * should fall back to the LIKE scan.
+ */
+export async function pendingFtsNoteIds(
+  db: D1Database,
+  userId: string,
+  limit: number,
+): Promise<{ ids: string[]; truncated: boolean }> {
+  const { results } = await db
+    .prepare(
+      `SELECT note_id FROM fts_index_queue WHERE user_id = ?1
+        ORDER BY created_at DESC LIMIT ?2`,
+    )
+    .bind(userId, limit + 1)
+    .all<{ note_id: string }>()
+  return {
+    ids: results.slice(0, limit).map((row) => row.note_id),
+    truncated: results.length > limit,
+  }
+}
+
 export async function drainAllFtsQueues(db: D1Database, maxUsers = 20): Promise<number> {
   const users = await selectQueueUsersRoundRobin(
     db,
