@@ -137,6 +137,8 @@ export async function tryConsumeSearchBudgetCall(
  * Record one sync pull for monitoring (no cap — the client backoff in
  * `src/client/lib/sync.ts` is the throttle; this counter only feeds the lint
  * report so runaway pollers are visible without a Cloudflare API token).
+ * No longer called by `GET /api/sync`: one app_meta row write per poll was pure
+ * D1 quota burn. Kept exported for ad-hoc diagnostics and existing tests.
  */
 export async function recordSyncPoll(
   db: D1Database,

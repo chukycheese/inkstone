@@ -252,7 +252,7 @@ export function renderReportMarkdown(report: LintReport): string {
   lines.push('', `## 검색 호출량 (D1 읽기, ${report.search_budget.day} UTC)`)
   lines.push('', `- 오늘 사용: ${report.search_budget.used}/${report.search_budget.cap}회 (잔여 ${report.search_budget.remaining}회)`)
   lines.push('', `## 동기화 폴링 횟수 (D1 읽기, ${report.sync_polls.day} UTC)`)
-  lines.push('', `- 오늘 폴링: ${report.sync_polls.count}회`)
+  lines.push('', `- 오늘 폴링: ${report.sync_polls.count}회 (집계 중단: 폴링마다 D1 쓰기를 하지 않도록 변경, 이전 기록만 남음)`)
   return lines.join('\n')
 }
 

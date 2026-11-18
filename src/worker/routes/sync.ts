@@ -5,7 +5,6 @@ import type { AppBindings } from '../env'
 import { NOTE_COLUMNS, toFolder, toNoteSummary, toTag, type FolderRow, type NoteRow, type TagRow } from '../db/rows'
 import { ApiError } from '../lib/errors'
 import { clampInt } from '../lib/request'
-import { recordSyncPoll } from '../lib/search-budget'
 import { requireAuth } from '../middleware/auth'
 
 export const syncRoutes = new Hono<AppBindings>()
@@ -24,12 +23,8 @@ const TAG_SELECT = `t.id, t.name, t.color, t.created_at,
 
 syncRoutes.get('/', requireAuth, async (c) => {
   const userId = c.get('userId')
-  // CKCZ-26: per-user daily sync-poll counter for the lint report (no
-  // Cloudflare token needed). Off the hot path via waitUntil; a counter
-  // write failure must never fail the sync itself.
-  c.executionCtx.waitUntil(recordSyncPoll(c.env.DB, userId).catch((error) => {
-    console.warn('[inkstone] sync poll counter failed:', error instanceof Error ? error.message : error)
-  }))
+  // CKCZ-26 counted every poll with an app_meta UPSERT per user per day; that
+  // per-poll D1 write is gone, so polling this endpoint now costs reads only.
   const since = clampInt(c.req.query('since'), 0, Number.MAX_SAFE_INTEGER, 0)
   const after = (c.req.query('after') ?? '').slice(0, 128)
 
