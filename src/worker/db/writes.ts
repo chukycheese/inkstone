@@ -1,5 +1,7 @@
 /** Keeps tags, backlinks, full-text indexes, and change records consistent with note writes. */
+import { LIMITS } from '@shared/constants'
 import { extractTags, extractWikiLinks, normalizeLinkKey } from '@shared/markdown-utils'
+import { truncateText } from '@shared/text-utils'
 import { newId } from '../lib/id'
 
 
@@ -64,6 +66,13 @@ export interface SyncDerivedOptions {
   title: string
   content: string
   ftsEnabled: boolean
+
+  /**
+   * Content before this write, when the caller already loaded the row. Lets
+   * the FTS queue skip a re-index whose indexed text (the title plus the
+   * truncated body) did not actually change.
+   */
+  previousContent?: string
 
   titleChanged?: boolean
 
@@ -205,7 +214,7 @@ export function buildNoteDerivedStatements(
     )
   }
 
-  if (ftsEnabled) {
+  if (ftsEnabled && ftsTextChanged(opts)) {
     const queueVersion = opts.expectedUpdatedAt ?? now
     statements.push(
       db
@@ -236,6 +245,20 @@ export function buildNoteDerivedStatements(
   }
 
   return { statements, tags: tagNames }
+}
+
+/**
+ * True when the text `notes_fts` stores for this note differs from what it
+ * stored before. Only the title and the first `ftsContentChars` of the body
+ * are indexed, so appending to a very long note past that window leaves the
+ * index entry correct and the whole-note re-index unnecessary.
+ */
+function ftsTextChanged(opts: SyncDerivedOptions): boolean {
+  if (opts.deleted) return true
+  if (opts.previousContent === undefined) return true
+  if (opts.titleChanged === true) return true
+  if (opts.previousTitle !== undefined && opts.previousTitle !== opts.title) return true
+  return truncateText(opts.previousContent, LIMITS.ftsContentChars) !== truncateText(opts.content, LIMITS.ftsContentChars)
 }
 
 function shiftPlaceholders(sql: string, offset: number): string {

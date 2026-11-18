@@ -11,7 +11,7 @@ import { ApiError } from '../lib/errors'
 import { isValidId, newId } from '../lib/id'
 import { broadcastUserCursor } from '../lib/notify'
 import { assertContentSize } from '../lib/request'
-import { enqueueNoteIndex } from './ai-search'
+import { embedTextUnchanged, enqueueNoteIndex } from './ai-search'
 import { runIdempotent } from './operations'
 import { buildOutline } from './retrieval'
 
@@ -359,6 +359,7 @@ async function patchNote(
       title: newTitle,
       content: newContent,
       ftsEnabled: context.ftsEnabled,
+      previousContent: row.content,
       titleChanged: newTitle !== row.title,
       previousTitle: row.title,
       expectedRev: nextRev,
@@ -390,7 +391,11 @@ async function patchNote(
     })
   }
   const note = await loadNote(context.env.DB, context.userId, row.id)
-  if (contentChanged || newTitle !== row.title) {
+  if ((contentChanged || newTitle !== row.title) &&
+    !embedTextUnchanged(
+      { title: row.title, content: row.content },
+      { title: newTitle, content: newContent },
+    )) {
     await enqueueNoteIndex(context.env.DB, context.userId, row.id, 'embed')
   }
   await afterMutation(context)

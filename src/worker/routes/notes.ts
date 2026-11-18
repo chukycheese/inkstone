@@ -26,7 +26,7 @@ import { isValidId, newId } from '../lib/id'
 import { broadcastCursor, scheduleFtsDrain } from '../lib/notify'
 import { assertContentSize, clampInt, JSON_BODY_LIMITS, readJson } from '../lib/request'
 import { requireAuth } from '../middleware/auth'
-import { aiDeleteNeededSql, enqueueNoteIndex, noteIndexQueueStatement } from '../mcp/ai-search'
+import { aiDeleteNeededSql, embedTextUnchanged, enqueueNoteIndex, noteIndexQueueStatement } from '../mcp/ai-search'
 
 export const notesRoutes = new Hono<AppBindings>()
 
@@ -479,6 +479,7 @@ notesRoutes.patch('/:id', async (c) => {
       title: newTitle,
       content: newContent,
       ftsEnabled,
+      previousContent: row.content,
       titleChanged: newTitle !== row.title,
       previousTitle: row.title,
       expectedRev: nextRev,
@@ -559,7 +560,13 @@ notesRoutes.patch('/:id', async (c) => {
   }
   await broadcastCursor(c, rewroteInbound ? undefined : changeResult?.results?.[0]?.seq)
   if (contentChanged || newTitle !== row.title) {
-    await enqueueNoteIndex(c.env.DB, userId, id, 'embed')
+    // An edit that leaves the embedded head of the note alone (typing at the
+    // end of a long note) does not need a new embedding queue write.
+    const embedNeeded = !embedTextUnchanged(
+      { title: row.title, content: row.content },
+      { title: newTitle, content: newContent },
+    )
+    if (embedNeeded) await enqueueNoteIndex(c.env.DB, userId, id, 'embed')
     scheduleFtsDrain(c)
   }
   const nextTags = contentChanged ? (derivedTags ?? extractTags(newContent)) : null
