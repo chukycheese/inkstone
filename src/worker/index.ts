@@ -7,6 +7,7 @@ import { drainAiIndexQueue } from './mcp/ai-search'
 import { drainDistillQueue } from './routes/distill'
 import { runWikiLint } from './routes/lint'
 import { runVocabPush } from './lib/vocab-push'
+import { shouldRunBackupSweep, shouldRunMaintenance } from './lib/cron-schedule'
 import { createOAuthProvider, providerForScheduled } from './mcp/oauth'
 import { purgeRevokedMcpApiKeys } from './mcp/api-keys'
 import { purgeExpiredMcpOperations } from './mcp/operations'
@@ -44,27 +45,34 @@ export default {
     return provider.fetch(oauthRequest, env, ctx)
   },
 
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const maintenanceDue = shouldRunMaintenance(event)
+    const backupDue = shouldRunBackupSweep(event)
     ctx.waitUntil((async () => {
       await initializeDatabase(env)
-      await Promise.all([
-        runScheduledBackups(env),
-        runAttachmentCleanup(env),
-        purgeExpiredMcpOperations(env.DB),
-        purgeExpiredOperationalData(env.DB),
-        purgeRevokedMcpApiKeys(env.DB),
-        providerForScheduled(env).purgeExpiredData(env, { batchSize: 100 }),
-        drainAiIndexQueue(env, 300),
-        drainDistillQueue(env, ctx, 3),
-        runWikiLint(env, ctx),
+      const jobs: Array<Promise<unknown>> = [
         // CKCZ-28: daily word (3x) + quiz (1x) pushes. Best-effort internally;
         // the outer catch keeps one flaky user from breaking the shared cron.
         runVocabPush(env).catch((error) => {
           console.warn('[vocab-push] cron failed:', error instanceof Error ? error.message : error)
           return { words: 0, quizzes: 0, users: 0 }
         }),
-        drainAllFtsQueues(env.DB),
-      ])
+      ]
+      if (backupDue) jobs.push(runScheduledBackups(env))
+      if (maintenanceDue) {
+        jobs.push(
+          runAttachmentCleanup(env),
+          purgeExpiredMcpOperations(env.DB),
+          purgeExpiredOperationalData(env.DB),
+          purgeRevokedMcpApiKeys(env.DB),
+          providerForScheduled(env).purgeExpiredData(env, { batchSize: 100 }),
+          drainAiIndexQueue(env, 300),
+          drainDistillQueue(env, ctx, 3),
+          runWikiLint(env, ctx),
+          drainAllFtsQueues(env.DB),
+        )
+      }
+      await Promise.all(jobs)
     })())
   },
 } satisfies ExportedHandler<Env>
