@@ -24,9 +24,9 @@ jobs:
     name: Release checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -36,14 +36,8 @@ jobs:
       # Mirrors the "Required checks" list in CONTRIBUTING.md.
       - run: npm run typecheck
       - run: npm run i18n:check
+      - run: npm run comments:check
       - run: npm run test:unit
-
-      # Non-blocking until CKCZ-47 reconciles the script with the codebase:
-      # comments:check currently reports ~280 pre-existing violations repo-wide,
-      # which would block every deploy. Keep it visible but let the build pass.
-      - name: Comment policy (non-blocking)
-        continue-on-error: true
-        run: npm run comments:check
 
   deploy:
     name: Deploy to Cloudflare Workers
@@ -53,9 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
