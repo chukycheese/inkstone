@@ -169,9 +169,9 @@ const allowed = new Map([
   ["src/worker/db/writes.ts", [
     "/** Keeps tags, backlinks, full-text indexes, and change records consistent with note writes. */",
     "/**\n   * Content before this write, when the caller already loaded the row. Lets\n   * the FTS queue skip a re-index whose indexed text (the title plus the\n   * truncated body) did not actually change.\n   */",
-    "// A brand-new note (rev 1, no previous title) must also resolve links that",
-    "// already point at its title; otherwise a \"wanted\" note stays unresolved",
-    "// until every source note is saved again.",
+    "// Re-resolve links that point at this title on every write. A create claims",
+    "// existing \"wanted\" links, and an edit repairs rows left stale by an older",
+    "// write or a title_key mismatch.",
     "/**\n * True when the text `notes_fts` stores for this note differs from what it\n * stored before. Only the title and the first `ftsContentChars` of the body\n * are indexed, so appending to a very long note past that window leaves the\n * index entry correct and the whole-note re-index unnecessary.\n */",
   ]],
   ["src/worker/env.ts", [

@@ -44,7 +44,7 @@ describe('link resolution when a note is created (CKCZ-49)', () => {
     expect(updates[0]!.binds).toContain('semantic layer')
   })
 
-  it('leaves links alone on a plain content update', () => {
+  it('re-resolves on a plain content update so stale rows self-heal', () => {
     const db = recorder()
     buildNoteDerivedStatements({
       db: db.db,
@@ -58,6 +58,6 @@ describe('link resolution when a note is created (CKCZ-49)', () => {
       expectedRev: 2,
     })
 
-    expect(linkUpdates(db.statements)).toHaveLength(0)
+    expect(linkUpdates(db.statements)).toHaveLength(1)
   })
 })

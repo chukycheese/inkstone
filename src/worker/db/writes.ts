@@ -227,12 +227,10 @@ export function buildNoteDerivedStatements(
     )
   }
 
-  // A brand-new note (rev 1, no previous title) must also resolve links that
-  // already point at its title; otherwise a "wanted" note stays unresolved
-  // until every source note is saved again.
-  const titleNeedsResolving = opts.titleChanged === true ||
-    (opts.previousTitle === undefined && opts.expectedRev === 1)
-  if (titleNeedsResolving) {
+  // Re-resolve links that point at this title on every write. A create claims
+  // existing "wanted" links, and an edit repairs rows left stale by an older
+  // write or a title_key mismatch.
+  {
     const currentKey = normalizeLinkKey(title)
     const previousKey = normalizeLinkKey(opts.previousTitle ?? title)
     statements.push(
