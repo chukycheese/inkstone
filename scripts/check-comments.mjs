@@ -482,6 +482,9 @@ const allowed = new Map([
     "// the daily cron both compute the same report; saving it as a note is opt-in.",
     "// Manual health-check endpoint: same authentication as /api/capture.",
     "/**\n * Cron entry: produce a daily lint report note per account (One account — One\n * note per UTC day). Cheap to run (SQL only), so it piggybacks on the hourly\n * scheduler but self-caps to once a day via app_meta.\n */",
+    "// CKCZ-49: a title containing `|` or a newline cannot survive the wikilink",
+    "// parser, so linking it would create an unresolved link and a broken list",
+    "// line. Only titles that round-trip become links; the rest are flattened.",
     "/**\n * CKCZ-31: length of the raw-capture body after the `Markdown Content:`\n * marker, computed from SQL `length()`/`instr()` so lint never pulls full\n * note contents (giant table notes included) just to measure them. Off by\n * surrounding whitespace vs the old trimmed measure — display-only.\n */",
   ]],
   ["src/worker/routes/mcp-settings.ts", [

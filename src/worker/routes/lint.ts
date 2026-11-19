@@ -8,6 +8,7 @@ import { getMeta, setMeta } from '../db/metadata'
 import { aiBudgetDayUTC, getAiBudgetCap, getAiBudgetUsage } from '../lib/ai-budget'
 import { getSearchBudgetCap, getSearchBudgetUsage, getSyncPollUsage } from '../lib/search-budget'
 import { DATABASE_STATE_KEY } from '../db/schema'
+import { extractWikiLinks, normalizeLinkKey } from '@shared/markdown-utils'
 import { resolveCaptureUserId } from './capture'
 
 export const lintRoutes = new Hono<AppBindings>()
@@ -216,6 +217,20 @@ export async function runWikiLint(
   return { reports, limited: false }
 }
 
+// CKCZ-49: a title containing `|` or a newline cannot survive the wikilink
+// parser, so linking it would create an unresolved link and a broken list
+// line. Only titles that round-trip become links; the rest are flattened.
+function reportLink(title: string): string {
+  const value = title.trim()
+  if (!value) return '_(제목 없음)_'
+  const links = extractWikiLinks(`[[${value}]]`)
+  return links.length === 1 && links[0]!.key === normalizeLinkKey(value) ? `[[${value}]]` : oneLine(value)
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s*\n+\s*/g, ' ').trim()
+}
+
 export function renderReportMarkdown(report: LintReport): string {
   const date = new Date(report.generated_at).toISOString().slice(0, 10)
   const lines = [
@@ -232,17 +247,17 @@ export function renderReportMarkdown(report: LintReport): string {
 
   lines.push('', `## 미처리 raw 캡처 (distill 후보) — ${report.pending_distill.length}건`)
   if (report.pending_distill.length) {
-    lines.push('', ...report.pending_distill.map((n) => `- [[${n.title}]] (${n.length}자)`))
+    lines.push('', ...report.pending_distill.map((n) => `- ${reportLink(n.title)} (${n.length}자)`))
   }
 
   lines.push('', `## 의심 노트 (broken/short capture) — ${report.broken_notes.length}건`)
   if (report.broken_notes.length) {
-    lines.push('', ...report.broken_notes.map((n) => `- [[${n.title}]] — ${n.excerpt}`))
+    lines.push('', ...report.broken_notes.map((n) => `- ${reportLink(n.title)} — ${oneLine(n.excerpt)}`))
   }
 
   lines.push('', `## 고아 노트 (위키링크 없음) — ${report.orphan_notes.length}건`)
   if (report.orphan_notes.length) {
-    lines.push('', ...report.orphan_notes.map((n) => `- [[${n.title}]]`))
+    lines.push('', ...report.orphan_notes.map((n) => `- ${reportLink(n.title)}`))
   }
 
   lines.push('', `## 미해결 위키링크 — ${report.unresolved_links}건`)
