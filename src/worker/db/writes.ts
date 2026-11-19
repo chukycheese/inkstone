@@ -227,7 +227,12 @@ export function buildNoteDerivedStatements(
     )
   }
 
-  if (opts.titleChanged === true) {
+  // A brand-new note (rev 1, no previous title) must also resolve links that
+  // already point at its title; otherwise a "wanted" note stays unresolved
+  // until every source note is saved again.
+  const titleNeedsResolving = opts.titleChanged === true ||
+    (opts.previousTitle === undefined && opts.expectedRev === 1)
+  if (titleNeedsResolving) {
     const currentKey = normalizeLinkKey(title)
     const previousKey = normalizeLinkKey(opts.previousTitle ?? title)
     statements.push(
