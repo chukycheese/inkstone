@@ -34,6 +34,7 @@ function reportWith(orphans: Array<{ note_id: string; title: string; updated_at:
     broken_notes: [],
     orphan_notes: orphans,
     unresolved_links: 0,
+    unresolved_top: [],
     ai_budget: { day: '2026-11-19', used: 0, cap: 30, remaining: 30 },
     search_budget: { day: '2026-11-19', used: 0, cap: 500, remaining: 500 },
     sync_polls: { day: '2026-11-19', count: 0 },
@@ -66,5 +67,20 @@ describe('renderReportMarkdown orphan links (CKCZ-49)', () => {
     const markdown = renderReportMarkdown(reportWith([orphan('')]))
     expect(markdown).not.toContain('[[')
     expect(markdown).toContain('- _(제목 없음)_')
+  })
+})
+
+describe('renderReportMarkdown unresolved backlog (CKCZ-49)', () => {
+  it('lists the most referenced missing targets without creating links', () => {
+    const report = reportWith([])
+    report.unresolved_links = 27
+    report.unresolved_top = [{ title: 'semantic layer', count: 16 }, { title: '요가', count: 13 }]
+
+    const markdown = renderReportMarkdown(report)
+
+    expect(markdown).toContain('## 미해결 위키링크 — 27건')
+    expect(markdown).toContain('- semantic layer ×16')
+    expect(markdown).toContain('- 요가 ×13')
+    expect(markdown).not.toContain('[[semantic layer]]')
   })
 })

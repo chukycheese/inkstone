@@ -485,6 +485,7 @@ const allowed = new Map([
     "// CKCZ-49: a title containing `|` or a newline cannot survive the wikilink",
     "// parser, so linking it would create an unresolved link and a broken list",
     "// line. Only titles that round-trip become links; the rest are flattened.",
+    "// These targets are unresolved by definition, so they stay plain text.",
     "/**\n * CKCZ-31: length of the raw-capture body after the `Markdown Content:`\n * marker, computed from SQL `length()`/`instr()` so lint never pulls full\n * note contents (giant table notes included) just to measure them. Off by\n * surrounding whitespace vs the old trimmed measure — display-only.\n */",
   ]],
   ["src/worker/routes/mcp-settings.ts", [
