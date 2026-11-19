@@ -174,6 +174,7 @@ const allowed = new Map([
   ["src/worker/env.ts", [
     "/** Workers AI binding for semantic search; optional so AI search degrades gracefully. */",
     "/** Optional jina Reader API key to avoid 429 rate limits on Worker egress IPs. */",
+    "/**\n   * NVIDIA NIM API key (CKCZ-48), used as the third chat-generation fallback\n   * after Workers AI's model chain. Set it without committing the value:\n   *   npx wrangler secret put NVIDIA_API_KEY\n   * Optional NVIDIA_MODEL overrides the default\n   * `meta/llama-3.3-70b-instruct` NIM model.\n   */",
     "/**\n   * Web Push (VAPID) bindings for PWA notifications (CKCZ-27).\n   * Provisioning (owner, one time):\n   *   1. Generate a P-256 VAPID pair. Any tool works, e.g.:\n   *        npx --yes web-push generate-vapid-keys --json\n   *   2. Store the secrets (never commit them):\n   *        npx wrangler secret put VAPID_PUBLIC_KEY   # base64url public key\n   *        npx wrangler secret put VAPID_PRIVATE_KEY  # base64url private key\n   *        npx wrangler secret put VAPID_SUBJECT      # e.g. mailto:owner@example.com\n   *   The public key is exposed to signed-in clients via GET /api/push/vapid-key\n   *   so browsers can subscribe; the private key never leaves the Worker.\n   *   Until the secrets exist, push endpoints report `configured: false` and\n   *   subscriptions are accepted but no messages are sent.\n   */",
   ]],
   ["src/worker/index.ts", [
@@ -211,8 +212,18 @@ const allowed = new Map([
     "// Primary and fallback Workers AI chat models. Every model in the chain must",
     "// accept { messages, max_tokens, temperature } so one prompt shape works",
     "// across fallbacks. Shared by the distill and query pipelines.",
-    "// Runs the chat model chain in order and returns the first non-empty response.",
-    "// Returns null when every model fails or returns garbage; never throws.",
+    "// CKCZ-48: third fallback. When every Workers AI model fails (neuron cap, 429,",
+    "// outage) and NVIDIA_API_KEY is configured, generation retries against NVIDIA",
+    "// NIM's OpenAI-compatible endpoint so distill/query/vocab keep working.",
+    "// Minimal environment needed for chat generation: the Workers AI binding and",
+    "// the optional NVIDIA fallback credentials. Callers pass the full Worker Env.",
+    "// True when at least one chat provider is configured: the Workers AI binding",
+    "// or the NVIDIA NIM fallback key. Routes gate on this instead of AI alone so a",
+    "// deployment can run on NVIDIA only, and so a runtime AI outage still degrades",
+    "// to the fallback instead of failing the request outright.",
+    "// Runs the Workers AI chain, then the NVIDIA NIM fallback. Returns the first",
+    "// non-empty response. Returns null when every provider fails or returns",
+    "// garbage; never throws.",
   ]],
   ["src/worker/lib/cron-schedule.ts", [
     "/**\n * Cron gating for the scheduled handler.\n *\n * `wrangler.toml` registers `0 * * * *` and `15,45 * * * *`, so `scheduled()`\n * runs 72 times a day and used to re-run every maintenance job each time:\n * backups, four purges, the OAuth provider purge, AI and FTS queue drains,\n * distill, wiki lint and vocab push, each reading and writing D1 rows even\n * when it has nothing to do.\n *\n * Two cadences replace that:\n * - Backups keep an hourly slot on the hourly trigger, because the per-account\n *   schedule setting goes down to `hourly` and `sixHourly` is the default\n *   (BACKUP_INTERVALS); the sweep itself decides who is due.\n * - Everything else is not minute-critical and runs twice a day, at 01:00 and\n *   13:00 UTC (10:00 and 22:00 KST).\n * Vocab pushes are not gated at all: their KST slots need minute punctuality.\n */",

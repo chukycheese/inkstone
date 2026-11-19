@@ -1,7 +1,7 @@
 import type { Env } from '../env'
 import { getMeta, setMeta } from '../db/metadata'
 import { tryConsumeAiBudgetCall } from './ai-budget'
-import { runChatModel } from './ai-chat'
+import { hasChatProvider, runChatModel } from './ai-chat'
 import { sendPushToUser } from '../routes/push'
 
 /**
@@ -518,8 +518,8 @@ async function sendQuizSlot(
     console.warn(`[vocab-push] no vocab pool for ${userId} (folder \`10 English\` with 기출 notes) — skipping`)
     return 'skipped'
   }
-  if (!env.AI) {
-    console.warn('[vocab-push] Workers AI is not configured — skipping quiz')
+  if (!hasChatProvider(env)) {
+    console.warn('[vocab-push] no AI chat provider is configured — skipping quiz')
     return 'skipped'
   }
   // One LLM call/day: reserve from this user's daily budget first; an
@@ -528,7 +528,7 @@ async function sendQuizSlot(
   if (!budget.allowed) return 'skipped'
   const dayWords = selectDayWords(pool, dayIndex)
   const prompt = buildQuizPrompt(dayWords)
-  const text = await runChatModel(env.AI, { ...prompt, maxTokens: 800 }, 'vocab-quiz')
+  const text = await runChatModel(env, { ...prompt, maxTokens: 800 }, 'vocab-quiz')
   if (!text) {
     console.warn(`[vocab-push] quiz model failed for ${userId}`)
     return 'retry'

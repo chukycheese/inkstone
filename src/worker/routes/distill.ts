@@ -7,7 +7,7 @@ import { enqueueNoteIndex } from '../mcp/ai-search'
 import { getMcpPreferences } from '../mcp/settings'
 import { editMcpNote, type McpWriteContext } from '../mcp/writes'
 import { getMeta, setMeta } from '../db/metadata'
-import { runChatModel } from '../lib/ai-chat'
+import { hasChatProvider, runChatModel } from '../lib/ai-chat'
 import { getAiBudgetStatus, tryConsumeAiBudgetCall } from '../lib/ai-budget'
 import { buildTrimmedStub, cleanYoutubeBody, extractUrlSource, isYouTubeCapture } from '../lib/youtube-clean'
 import { DATABASE_STATE_KEY } from '../db/schema'
@@ -47,7 +47,7 @@ distillRoutes.post('/', async (c) => {
 
   const preferences = await getMcpPreferences(c.env.DB, userId)
   if (!preferences.writeEnabled) throw ApiError.forbidden('MCP writes are disabled in Inkstone settings')
-  if (!c.env.AI) throw new ApiError(503, 'server_misconfigured', 'Workers AI is not configured on this deployment')
+  if (!hasChatProvider(c.env)) throw new ApiError(503, 'server_misconfigured', 'No AI chat provider is configured on this deployment')
 
   const body = await readJson<{
     note_id?: string
@@ -102,7 +102,7 @@ export async function drainDistillQueue(
   executionCtx: ExecutionContext,
   max: number,
 ): Promise<{ processed: number; limited: boolean }> {
-  if (!env.AI) return { processed: 0, limited: false }
+  if (!hasChatProvider(env)) return { processed: 0, limited: false }
   const budget = Math.max(0, Math.trunc(max))
   if (!Number.isFinite(budget) || budget === 0) return { processed: 0, limited: false }
 
@@ -236,7 +236,7 @@ async function distillOne(
 ): Promise<DistillResult> {
   const gate = gateCandidate(row, refresh)
   if (gate) return { ok: false, note_id: row.id, title: row.title, reason: gate }
-  if (!context.env.AI) return { ok: false, note_id: row.id, title: row.title, error: 'Workers AI is not configured' }
+  if (!hasChatProvider(context.env)) return { ok: false, note_id: row.id, title: row.title, error: 'No AI chat provider is configured' }
 
   const rawBody = extractDistillBody(row.content)
   // YouTube page dumps are ~90% sidebar/comments/shopping boilerplate.
@@ -263,7 +263,7 @@ async function distillOne(
     return { ok: false, note_id: row.id, title: row.title, reason: `ai budget exceeded (daily cap ${budget.cap})` }
   }
 
-  const markdown = await runChatModel(context.env.AI, { system, user }, 'distill')
+  const markdown = await runChatModel(context.env, { system, user }, 'distill')
   if (!markdown) {
     console.warn(`[distill] all models failed for ${row.id}`)
     return { ok: false, note_id: row.id, title: row.title, error: 'all distill models failed' }

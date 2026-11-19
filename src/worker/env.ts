@@ -32,6 +32,17 @@ export interface Env {
   JINA_API_KEY?: string
 
   /**
+   * NVIDIA NIM API key (CKCZ-48), used as the third chat-generation fallback
+   * after Workers AI's model chain. Set it without committing the value:
+   *   npx wrangler secret put NVIDIA_API_KEY
+   * Optional NVIDIA_MODEL overrides the default
+   * `meta/llama-3.3-70b-instruct` NIM model.
+   */
+  NVIDIA_API_KEY?: string
+
+  NVIDIA_MODEL?: string
+
+  /**
    * Web Push (VAPID) bindings for PWA notifications (CKCZ-27).
    * Provisioning (owner, one time):
    *   1. Generate a P-256 VAPID pair. Any tool works, e.g.:

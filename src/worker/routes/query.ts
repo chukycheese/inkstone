@@ -4,7 +4,7 @@ import type { AppBindings } from '../env'
 import { ApiError } from '../lib/errors'
 import { newId } from '../lib/id'
 import { tryConsumeAiBudgetCall } from '../lib/ai-budget'
-import { runChatModel } from '../lib/ai-chat'
+import { hasChatProvider, runChatModel } from '../lib/ai-chat'
 import { JSON_BODY_LIMITS, readJson } from '../lib/request'
 import { fuseByRrf, searchSemanticNotes } from '../mcp/ai-search'
 import { getMcpPreferences } from '../mcp/settings'
@@ -60,7 +60,7 @@ interface SourceItem {
 queryRoutes.post('/', async (c) => {
   const userId = await resolveCaptureUserId(c)
   if (!userId) throw ApiError.unauthenticated()
-  if (!c.env.AI) throw new ApiError(503, 'server_misconfigured', 'Workers AI is not configured on this deployment')
+  if (!hasChatProvider(c.env)) throw new ApiError(503, 'server_misconfigured', 'No AI chat provider is configured on this deployment')
 
   const body = await readJson<{
     question?: string
@@ -140,7 +140,7 @@ queryRoutes.post('/', async (c) => {
     throw new ApiError(429, 'too_many_attempts', `Daily AI budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
   }
 
-  const answer = await runChatModel(c.env.AI, { system, user }, 'query')
+  const answer = await runChatModel(c.env, { system, user }, 'query')
   if (!answer) {
     throw new ApiError(502, 'internal', 'Query synthesis failed — all chat models are unavailable')
   }
