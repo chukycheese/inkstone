@@ -17,6 +17,8 @@ export const DISTILL_MARKER = '> status: distilled'
 export const DISTILL_SOURCE_MARKER = 'Markdown Content:'
 const LINT_BROKEN_MIN_CAPTURE_CHARS = 800
 const LINT_DAILY_META_KEY = 'lint:last_cron_day'
+const LINT_REPORT_TITLE_PREFIX = 'LLM Wiki Lint Report'
+const LINT_REPORT_TITLE_LIKE = `${LINT_REPORT_TITLE_PREFIX}%`
 
 export interface LintReport {
   generated_at: number
@@ -38,6 +40,9 @@ export interface LintReport {
 // the daily cron both compute the same report; saving it as a note is opt-in.
 export async function lintWiki(db: D1Database, userId: string): Promise<LintReport> {
   const day = aiBudgetDayUTC()
+  // Report notes are derived snapshots of the same gaps, so orphan and
+  // unresolved counts skip them; including them would count yesterday's
+  // findings again and make the backlog look like it is growing.
   const [counts, folderRows, pending, broken, orphans, unresolved, unresolvedTop] = await Promise.all([
     db.prepare(
       `SELECT COUNT(*) AS n, COALESCE(SUM(word_count), 0) AS words FROM notes
@@ -71,19 +76,21 @@ export async function lintWiki(db: D1Database, userId: string): Promise<LintRepo
     db.prepare(
       `SELECT n.id, n.title, n.updated_at FROM notes n
         WHERE n.user_id = ?1 AND n.deleted_at IS NULL AND n.is_archived = 0
+          AND n.title NOT LIKE ?2
           AND NOT EXISTS (
             SELECT 1 FROM links l WHERE l.user_id = n.user_id
               AND (l.source_note_id = n.id OR l.target_note_id = n.id))
         ORDER BY n.updated_at DESC LIMIT 50`,
-    ).bind(userId).all<{ id: string; title: string; updated_at: number }>(),
+    ).bind(userId, LINT_REPORT_TITLE_LIKE).all<{ id: string; title: string; updated_at: number }>(),
     db.prepare(
-      `SELECT COUNT(*) AS n FROM links WHERE user_id = ?1 AND target_note_id IS NULL`,
-    ).bind(userId).first<{ n: number }>(),
+      `SELECT COUNT(*) AS n FROM links l JOIN notes s ON s.id = l.source_note_id
+        WHERE l.user_id = ?1 AND l.target_note_id IS NULL AND s.title NOT LIKE ?2`,
+    ).bind(userId, LINT_REPORT_TITLE_LIKE).first<{ n: number }>(),
     db.prepare(
-      `SELECT target_title AS title, COUNT(*) AS n FROM links
-        WHERE user_id = ?1 AND target_note_id IS NULL
-        GROUP BY target_key ORDER BY n DESC, target_title COLLATE NOCASE ASC LIMIT 20`,
-    ).bind(userId).all<{ title: string; n: number }>(),
+      `SELECT l.target_title AS title, COUNT(*) AS n FROM links l JOIN notes s ON s.id = l.source_note_id
+        WHERE l.user_id = ?1 AND l.target_note_id IS NULL AND s.title NOT LIKE ?2
+        GROUP BY l.target_key ORDER BY n DESC, l.target_title COLLATE NOCASE ASC LIMIT 20`,
+    ).bind(userId, LINT_REPORT_TITLE_LIKE).all<{ title: string; n: number }>(),
   ])
 
   const [budgetUsed, budgetCap, searchUsed, searchCap, syncPolls] = await Promise.all([
