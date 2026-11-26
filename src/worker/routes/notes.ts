@@ -156,28 +156,16 @@ notesRoutes.get('/', async (c) => {
   const listStatement = cursor.kind === 'legacy'
     ? c.env.DB.prepare(listSql).bind(...binds, limit + 1, cursor.offset)
     : c.env.DB.prepare(listSql).bind(...binds, limit + 1)
-  let countResult, listResult
-  try {
-    [countResult, listResult] = await c.env.DB.batch([
-      c.env.DB.prepare(`SELECT COUNT(*) AS total FROM notes n WHERE ${countWhere}`).bind(...countBinds),
-      listStatement,
-    ])
-  } catch (e) {
-    console.log('DEBUG batch error:', e)
-    throw e
-  }
+  const [countResult, listResult] = await c.env.DB.batch([
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM notes n WHERE ${countWhere}`).bind(...countBinds),
+    listStatement,
+  ])
 
   const total = Number((countResult?.results?.[0] as { total?: unknown } | undefined)?.total ?? 0)
   const rows = listResult?.results as NoteRow[] | undefined ?? []
   const pageRows = rows.slice(0, limit)
   const notes = pageRows.map(toNoteSummary)
-  console.log('DEBUG SQL:', listSql)
-  console.log('DEBUG binds:', JSON.stringify(binds))
-  console.log('DEBUG countWhere:', countWhere)
-  console.log('DEBUG countBinds:', JSON.stringify(countBinds))
-  const debugRows = await c.env.DB.prepare(`SELECT n.id, n.user_id, n.folder_id FROM notes n WHERE n.deleted_at IS NULL AND n.is_archived = 0`).all()
-  const debugShares = await c.env.DB.prepare(`SELECT * FROM folder_shares`).all()
-  console.log('DEBUG all shares:', JSON.stringify(debugShares.results))
+
 
   const body: ListNotesResponse = {
     notes,
