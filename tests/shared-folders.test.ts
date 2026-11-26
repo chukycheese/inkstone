@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { AppBindings } from '../src/worker/env'
 import { SCHEMA_STATEMENTS } from '../src/worker/db/schema'
 import { foldersRoutes } from '../src/worker/routes/folders'
+import { errorResponse } from '../src/worker/lib/errors'
 import { notesRoutes } from '../src/worker/routes/notes'
 import { searchRoutes } from '../src/worker/routes/search'
 import { SqliteD1 } from './helpers/sqlite-d1'
@@ -29,6 +30,7 @@ function makeApp(userId: string): Hono<AppBindings> {
     c.env = { ...(c.env ?? {}), DB: db }
     await next()
   })
+  app.onError((err, c) => errorResponse(c, err))
   app.route('/api/folders', foldersRoutes)
   app.route('/api/notes', notesRoutes)
   app.route('/api', searchRoutes)

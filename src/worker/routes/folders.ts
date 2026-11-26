@@ -697,6 +697,9 @@ async function loadOwnedShareableFolder(
   userId: string,
   folderId: string,
 ): Promise<{ id: string; user_id: string }> {
+  const allRows = await db.prepare(`SELECT id, user_id, deleted_at FROM folders`).all()
+  console.log('DEBUG folders:', JSON.stringify(allRows.results))
+  console.log('DEBUG looking for:', folderId, userId)
   const row = await db
     .prepare(`SELECT id, user_id FROM folders WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL`)
     .bind(folderId, userId)

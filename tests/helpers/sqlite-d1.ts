@@ -61,7 +61,8 @@ export class SqliteStatement {
     const stmt = this.db.prepare(this.sql)
     // RETURNING clauses must be stepped to capture rows; we run then query.
     const isReturning = /\bRETURNING\b/i.test(this.sql)
-    if (isReturning) {
+    const isSelect = /^\s*(SELECT|WITH)\b/i.test(this.sql)
+    if (isReturning || isSelect) {
       const rows = stmt.all(...(this.binds as never[])).map((row) => plain(row))
       return { results: rows, success: true, meta: { changes: rows.length } }
     }
