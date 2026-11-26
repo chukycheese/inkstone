@@ -14,6 +14,8 @@ import { clampInt } from '../lib/request'
 import { tryConsumeSearchBudgetCall } from '../lib/search-budget'
 import { consumeAttemptBudget, ThrottleError } from '../lib/throttle'
 import { requireAuth } from '../middleware/auth'
+import { noteAccessSql } from '../db/shared'
+import { sharedOwnerIds } from '../db/shared'
 
 export const searchRoutes = new Hono<AppBindings>()
 
@@ -190,13 +192,21 @@ export async function searchUserNotes(
     try {
       // Settled rows only: a note that changed moments ago is read below rather
       // than re-indexed here, so a search never triggers a whole-note re-index.
-      if (drain) await drainFtsQueue(db, userId, 50)
+      // CKCZ-23: shared notes are indexed under their owner; drain the
+      // caller's queue plus every shared-folder owner's queue.
+      const owners = [userId, ...(await sharedOwnerIds(db, userId))]
+      if (drain) {
+        for (const owner of owners) await drainFtsQueue(db, owner, 50)
+      }
       // A note queued for re-index is usually the one being written right
       // now. Reading those few notes directly keeps search current without
       // dropping to the full-table LIKE scan for a stale queue entry.
-      const pending = await pendingFtsNoteIds(db, userId, PENDING_FTS_MERGE_MAX)
-      if (pending.truncated) useFts = false
-      else pendingIds = pending.ids
+      const pendingLists = await Promise.all(
+        owners.map((owner) => pendingFtsNoteIds(db, owner, PENDING_FTS_MERGE_MAX)),
+      )
+      const pendingIdsAll = pendingLists.flatMap((list) => list.ids)
+      if (pendingLists.some((list) => list.truncated)) useFts = false
+      else pendingIds = [...new Set(pendingIdsAll)].slice(0, PENDING_FTS_MERGE_MAX)
     } catch {
       useFts = false
     }
@@ -288,8 +298,10 @@ async function ftsSearch(
   if (!match) return []
 
   const binds: unknown[] = [`{title body} : (${match})`, userId]
-  let where = `notes_fts MATCH ?1 AND notes_fts.user_id = ?2
-    AND n.user_id = ?2 AND n.deleted_at IS NULL`
+  // CKCZ-23: match notes owned by the caller OR notes in shared folders.
+  let where = `notes_fts MATCH ?1
+    AND notes_fts.user_id = n.user_id AND n.deleted_at IS NULL
+    AND ${noteAccessSql('n', '?2')}`
   applyFilters(q, binds, (clause) => (where += clause))
   binds.push(q.terms[0]!)
   const contentWindow = contentWindowSql(binds.length)
@@ -326,7 +338,8 @@ async function likeSearch(
 ): Promise<SearchHit[]> {
   const binds: unknown[] = [userId]
   const termBindIndexes: number[] = []
-  let where = 'n.user_id = ?1'
+  // CKCZ-23: owned + shared. The shared branch never matches trashed notes.
+  let where = noteAccessSql('n', '?1')
   where += q.trash ? ' AND n.deleted_at IS NOT NULL' : ' AND n.deleted_at IS NULL'
 
   // CKCZ-26: stop-word-only queries scan titles only (bounded, no full-body
@@ -416,7 +429,7 @@ async function pendingNoteHits(
 ): Promise<SearchHit[]> {
   if (!ids.length || !q.terms.length) return []
   const binds: unknown[] = [userId, JSON.stringify(ids)]
-  let where = `n.user_id = ?1 AND n.deleted_at IS NULL
+  let where = `${noteAccessSql('n', '?1')} AND n.deleted_at IS NULL
     AND n.id IN (SELECT value FROM json_each(?2))`
   for (const term of q.terms) {
     binds.push(`%${escapeLike(term)}%`)

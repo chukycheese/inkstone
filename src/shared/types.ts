@@ -178,6 +178,27 @@ export interface Folder {
   updatedAt: number
 
   noteCount?: number
+
+  /** CKCZ-23: true when this folder is shared *to* the current user. */
+  shared?: boolean
+  /** CKCZ-23: folder owner's user id (set for shared folders). */
+  ownerUserId?: string
+  /** CKCZ-23: caller's share role on this folder. */
+  shareRole?: FolderShareRole
+  /** CKCZ-23: folder owner's display name (set for shared folders). */
+  ownerName?: string
+}
+
+/** CKCZ-23: folder share role. `write` never grants delete. */
+export type FolderShareRole = 'read' | 'write'
+
+export interface FolderShare {
+  folderId: string
+  ownerUserId: string
+  granteeUserId: string
+  role: FolderShareRole
+  granteeName?: string
+  granteeLogin?: string
 }
 
 export interface Tag {

@@ -6,6 +6,7 @@ import type { Env } from '../env'
 import { ApiError } from '../lib/errors'
 import { isValidId } from '../lib/id'
 import { tryConsumeSearchBudgetCall } from '../lib/search-budget'
+import { noteAccessSql } from '../db/shared'
 import { searchUserNotes } from '../routes/search'
 import {
   fuseByRrf,
@@ -200,7 +201,7 @@ export async function loadMcpNote(db: D1Database, userId: string, id: string): P
   const noteId = normalizeNoteId(id)
   const row = await db.prepare(
     `SELECT ${NOTE_COLUMNS_FULL} FROM notes n
-      WHERE n.id = ?1 AND n.user_id = ?2 AND n.deleted_at IS NULL`,
+      WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')} AND n.deleted_at IS NULL`,
   ).bind(noteId, userId).first<NoteRow>()
   if (!row) throw ApiError.notFound('Note not found')
   return toNote(row)
@@ -311,8 +312,8 @@ export async function getMcpNoteContext(
   const { results: outgoing } = await db.prepare(
     `SELECT l.target_title AS referenced_title, n.id, n.title, n.excerpt, n.updated_at
        FROM links l LEFT JOIN notes n
-         ON n.id = l.target_note_id AND n.user_id = ?1 AND n.deleted_at IS NULL
-      WHERE l.user_id = ?1 AND l.source_note_id = ?2
+         ON n.id = l.target_note_id AND n.deleted_at IS NULL AND ${noteAccessSql('n', '?1')}
+      WHERE l.user_id = (SELECT user_id FROM notes WHERE id = ?2) AND l.source_note_id = ?2
       ORDER BY n.updated_at DESC, l.target_title COLLATE NOCASE ASC LIMIT ?3`,
   ).bind(userId, note.id, capped).all<{
     referenced_title: string
@@ -324,8 +325,8 @@ export async function getMcpNoteContext(
   const { results: backlinks } = await db.prepare(
     `SELECT n.id, n.title, n.excerpt, n.updated_at
        FROM links l JOIN notes n ON n.id = l.source_note_id
-      WHERE l.user_id = ?1 AND l.target_note_id = ?2
-        AND n.user_id = ?1 AND n.deleted_at IS NULL
+      WHERE l.user_id = (SELECT user_id FROM notes WHERE id = ?2) AND l.target_note_id = ?2
+        AND n.user_id = l.user_id AND n.deleted_at IS NULL AND ${noteAccessSql('n', '?1')}
       ORDER BY n.updated_at DESC, n.id ASC LIMIT ?3`,
   ).bind(userId, note.id, capped).all<{
     id: string
@@ -375,7 +376,7 @@ export async function listMcpNotes(
   const view = input.view ?? 'recent'
   const limit = Math.max(1, Math.min(50, input.limit ?? 20))
   const cursor = parseListCursor(input.cursor)
-  let where = 'n.user_id = ?1'
+  let where = noteAccessSql('n', '?1')
   if (view === 'trash') where += ' AND n.deleted_at IS NOT NULL'
   else {
     where += ' AND n.deleted_at IS NULL'
@@ -418,11 +419,22 @@ export async function listMcpNotes(
 }
 
 export async function listMcpFolders(db: D1Database, userId: string): Promise<Record<string, unknown>> {
+  // CKCZ-23: owned + shared folders. note_count counts notes the caller can
+  // see: for owned folders all notes; for shared folders notes visible to
+  // the caller (notes in a shared folder are all shared).
   const { results } = await db.prepare(
-    `SELECT f.id, f.parent_id, f.name, f.position,
+    `SELECT f.id, f.parent_id, f.name, f.position, shared.shared,
             (SELECT COUNT(*) FROM notes n
-              WHERE n.user_id = f.user_id AND n.folder_id = f.id AND n.deleted_at IS NULL) AS note_count
-       FROM folders f WHERE f.user_id = ?1 AND f.deleted_at IS NULL
+              WHERE n.folder_id = f.id AND n.deleted_at IS NULL) AS note_count
+       FROM folders f
+       JOIN (
+         SELECT id, 0 AS shared FROM folders WHERE user_id = ?1 AND deleted_at IS NULL
+         UNION
+         SELECT fs.folder_id AS id, 1 AS shared FROM folder_shares fs
+           JOIN folders sf ON sf.id = fs.folder_id AND sf.deleted_at IS NULL AND sf.user_id = fs.owner_user_id
+          WHERE fs.grantee_user_id = ?1
+       ) shared ON shared.id = f.id
+      WHERE f.deleted_at IS NULL
       ORDER BY f.position ASC, f.name COLLATE NOCASE ASC`,
   ).bind(userId).all<{
     id: string
@@ -430,6 +442,7 @@ export async function listMcpFolders(db: D1Database, userId: string): Promise<Re
     name: string
     position: number
     note_count: number
+    shared: number
   }>()
   const byId = new Map(results.map((folder) => [folder.id, folder]))
   const pathFor = (folder: (typeof results)[number]): string => {
@@ -450,6 +463,7 @@ export async function listMcpFolders(db: D1Database, userId: string): Promise<Re
       name: folder.name,
       path: pathFor(folder),
       note_count: folder.note_count,
+      shared: folder.shared === 1,
     })),
   }
 }

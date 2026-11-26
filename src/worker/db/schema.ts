@@ -53,6 +53,18 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_unique_sibling
      ON folders(user_id, IFNULL(parent_id, ''), lower(name)) WHERE deleted_at IS NULL`,
 
+  `CREATE TABLE IF NOT EXISTS folder_shares (
+    folder_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    grantee_user_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('read', 'write')),
+    PRIMARY KEY (folder_id, grantee_user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_folder_shares_grantee
+     ON folder_shares(grantee_user_id, folder_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_folder_shares_owner
+     ON folder_shares(owner_user_id, folder_id)`,
+
   `CREATE TABLE IF NOT EXISTS notes (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -552,6 +564,24 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
          ON push_subscriptions(user_id, created_at DESC)`,
     ],
   },
+  {
+    // CKCZ-23: folder-level sharing. Additive CREATE TABLE; existing rows
+    // are untouched and user_id isolation is preserved for non-shared data.
+    version: 15,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS folder_shares (
+        folder_id TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL,
+        grantee_user_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('read', 'write')),
+        PRIMARY KEY (folder_id, grantee_user_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_folder_shares_grantee
+         ON folder_shares(grantee_user_id, folder_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_folder_shares_owner
+         ON folder_shares(owner_user_id, folder_id)`,
+    ],
+  },
 ]
 
 const FTS_STATEMENT = `CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
@@ -576,6 +606,7 @@ const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   schema_migrations: ['version', 'applied_at'],
   users: ['id', 'username', 'password_hash', 'login', 'name', 'avatar_url', 'role', 'settings', 'created_at', 'last_seen_at'],
   folders: ['id', 'user_id', 'parent_id', 'name', 'icon', 'color', 'position', 'created_at', 'updated_at', 'deleted_at'],
+  folder_shares: ['folder_id', 'owner_user_id', 'grantee_user_id', 'role'],
   notes: ['id', 'user_id', 'folder_id', 'title', 'title_key', 'content', 'excerpt', 'rev', 'word_count', 'char_count', 'is_pinned', 'is_starred', 'is_archived', 'position', 'content_hash', 'created_at', 'updated_at', 'deleted_at'],
   tags: ['id', 'user_id', 'name', 'color', 'is_manual', 'created_at'],
   note_tags: ['note_id', 'tag_id'],
@@ -609,6 +640,7 @@ const REQUIRED_TABLES = [
   'schema_migrations',
   'users',
   'folders',
+  'folder_shares',
   'notes',
   'tags',
   'note_tags',
@@ -640,6 +672,8 @@ const REQUIRED_TABLES = [
 const REQUIRED_INDEXES = [
   'idx_folders_user',
   'idx_folders_unique_sibling',
+  'idx_folder_shares_grantee',
+  'idx_folder_shares_owner',
   'idx_notes_user_updated',
   'idx_notes_folder',
   'idx_notes_starred',

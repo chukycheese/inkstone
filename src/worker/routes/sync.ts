@@ -6,6 +6,7 @@ import { NOTE_COLUMNS, toFolder, toNoteSummary, toTag, type FolderRow, type Note
 import { ApiError } from '../lib/errors'
 import { clampInt } from '../lib/request'
 import { requireAuth } from '../middleware/auth'
+import { noteAccessSql } from '../db/shared'
 
 export const syncRoutes = new Hono<AppBindings>()
 
@@ -113,7 +114,7 @@ syncRoutes.get('/', requireAuth, async (c) => {
   const notes = await loadInChunks(noteIds, (ids) =>
     c.env.DB.prepare(
       `SELECT ${NOTE_COLUMNS} FROM notes n
-        WHERE n.user_id = ?1 AND n.id IN (${placeholders(ids.length, 2)})`,
+        WHERE ${noteAccessSql('n', '?1')} AND n.id IN (${placeholders(ids.length, 2)})`,
     )
       .bind(userId, ...ids)
       .all<NoteRow>(),
@@ -214,7 +215,7 @@ async function fullSnapshot(
   const [notes, folders, tags] = await Promise.all([
     db
       .prepare(
-        `SELECT ${NOTE_COLUMNS} FROM notes n WHERE n.user_id = ?1
+        `SELECT ${NOTE_COLUMNS} FROM notes n WHERE ${noteAccessSql('n', '?1')}
           AND n.id > ?2 ORDER BY n.id ASC LIMIT ?3`,
       )
       .bind(userId, after, LIMITS.syncBatchSize + 1)
@@ -222,7 +223,11 @@ async function fullSnapshot(
     !after
       ? db
           .prepare(
-            `SELECT ${FOLDER_SELECT} FROM folders f WHERE f.user_id = ?1 AND f.deleted_at IS NULL
+            `SELECT ${FOLDER_SELECT} FROM folders f WHERE f.deleted_at IS NULL
+              AND (f.user_id = ?1 OR EXISTS (
+                SELECT 1 FROM folder_shares fs
+                WHERE fs.folder_id = f.id AND fs.grantee_user_id = ?1 AND fs.owner_user_id = f.user_id
+              ))
               ORDER BY f.position ASC`,
           )
           .bind(userId)

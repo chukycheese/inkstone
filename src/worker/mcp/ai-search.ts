@@ -11,6 +11,7 @@
 import { toPlainText } from '@shared/markdown-utils'
 import { truncateText } from '@shared/text-utils'
 import { getMeta, selectQueueUsersRoundRobin, setMeta } from '../db/metadata'
+import { noteAccessSql } from '../db/shared'
 import type { Env } from '../env'
 
 export const AI_EMBEDDING_MODEL = '@cf/baai/bge-m3'
@@ -487,7 +488,13 @@ async function loadSemanticCandidates(
 
 async function readSemanticVersion(db: D1Database, userId: string): Promise<number> {
   const row = await db
-    .prepare(`SELECT MAX(indexed_at) AS version FROM ai_note_embeddings WHERE user_id = ?1`)
+    .prepare(
+      `SELECT MAX(indexed_at) AS version FROM ai_note_embeddings
+        WHERE (user_id = ?1 OR user_id IN (
+          SELECT fs.owner_user_id FROM folder_shares fs
+          JOIN folders sf ON sf.id = fs.folder_id AND sf.deleted_at IS NULL AND sf.user_id = fs.owner_user_id
+          WHERE fs.grantee_user_id = ?1))`,
+    )
     .bind(userId)
     .first<{ version: number | null }>()
   return row?.version ?? 0
@@ -507,14 +514,19 @@ async function readSemanticVectorRows(
   limit: number,
 ): Promise<SemanticVectorRow[]> {
   const binds: unknown[] = [userId]
-  let where = 'e.user_id = ?1'
-  if (hasSemanticFilters(filters)) {
-    const clause = noteFilterClause('n', filters, 2)
-    where += ` AND EXISTS (SELECT 1 FROM notes n
-      WHERE n.id = e.note_id AND n.user_id = e.user_id
-        AND n.deleted_at IS NULL${clause.sql})`
-    binds.push(...clause.binds)
-  }
+  // CKCZ-23: vectors are keyed by note owner; shared-folder notes owned by
+  // another member are eligible when that folder is shared with `userId`.
+  let where = `(e.user_id = ?1 OR e.user_id IN (
+    SELECT fs.owner_user_id FROM folder_shares fs
+    JOIN folders sf ON sf.id = fs.folder_id AND sf.deleted_at IS NULL AND sf.user_id = fs.owner_user_id
+    WHERE fs.grantee_user_id = ?1))`
+  // Always apply note access + optional filters. `noteAccessSql` needs the
+  // user bind; it re-checks shared scope per note before it can rank.
+  const clause = noteFilterClause('n', filters, 2)
+  where += ` AND EXISTS (SELECT 1 FROM notes n
+    WHERE n.id = e.note_id AND n.user_id = e.user_id
+      AND n.deleted_at IS NULL AND ${noteAccessSql('n', '?1')}${clause.sql})`
+  binds.push(...clause.binds)
   if (since !== null) {
     binds.push(since)
     where += ` AND e.indexed_at >= ?${binds.length}`
@@ -545,7 +557,7 @@ async function hydrateSemanticNotes(
   const { results } = await db
     .prepare(
       `SELECT n.id, n.title, n.excerpt, n.rev, n.updated_at FROM notes n
-        WHERE n.user_id = ?1 AND n.deleted_at IS NULL
+        WHERE ${noteAccessSql('n', '?1')} AND n.deleted_at IS NULL
           AND n.id IN (SELECT value FROM json_each(?2))${clause.sql}`,
     )
     .bind(userId, JSON.stringify(ids), ...clause.binds)
@@ -642,16 +654,6 @@ export function semanticCacheStats(): { entries: number; bytes: number } {
   let bytes = 0
   for (const entry of semanticCandidateCache.values()) bytes += entry.bytes
   return { entries: semanticCandidateCache.size, bytes }
-}
-
-function hasSemanticFilters(filters: SemanticFilters): boolean {
-  return Boolean(
-    filters.starred === true ||
-    filters.archived === true ||
-    filters.archived === false ||
-    filters.folder ||
-    (filters.tags && filters.tags.length > 0),
-  )
 }
 
 /**
