@@ -1,8 +1,4 @@
-/**
- * Minimal D1Database shim over node:sqlite for integration tests.
- * Supports prepare/bind/all/first/run + atomic batch, numbered `?NNN`
- * placeholders, and SQLite extensions (FTS5, json_each).
- */
+
 import { DatabaseSync } from 'node:sqlite'
 
 export interface D1ResultLike<T = unknown> {
@@ -56,10 +52,10 @@ export class SqliteStatement {
     }
   }
 
-  /** Internal: execute inside an open transaction. */
+  
   execInTransaction(): D1ResultLike {
     const stmt = this.db.prepare(this.sql)
-    // RETURNING clauses must be stepped to capture rows; we run then query.
+
     const isReturning = /\bRETURNING\b/i.test(this.sql)
     const isSelect = /^\s*(SELECT|WITH)\b/i.test(this.sql)
     if (isReturning || isSelect) {

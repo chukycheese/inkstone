@@ -1,13 +1,4 @@
-/**
- * Private AI semantic search for the MCP module.
- *
- * Notes are embedded with Workers AI (`@cf/baai/bge-m3`, 1024 dims,
- * multilingual) and the vectors live in D1 — no public query endpoint, one
- * index per account. Content changes are queued and drained in the
- * background; when the AI binding is missing or the model call fails the
- * feature degrades to plain lexical search instead of failing (the old
- * behavior that surfaced as HTTP 503s).
- */
+
 import { toPlainText } from '@shared/markdown-utils'
 import { truncateText } from '@shared/text-utils'
 import { getMeta, selectQueueUsersRoundRobin, setMeta } from '../db/metadata'
@@ -17,18 +8,7 @@ import type { Env } from '../env'
 export const AI_EMBEDDING_MODEL = '@cf/baai/bge-m3'
 const AI_EMBEDDING_DIMS = 1024
 const EMBED_TEXT_MAX_CHARS = 4_000
-/**
- * CKCZ-31: per-query vector row ceiling (was 8,000). Semantic retrieval
- * loads every candidate vector into memory to score it, so each MCP/HTTP
- * search read up to 8k rows; 2k keeps recall for personal-size libraries
- * while cutting the worst case 4x.
- *
- * The ceiling applies to a cold load only: candidates are cached per isolate
- * (see `loadSemanticCandidates`) and refreshed from `MAX(indexed_at)`, so a
- * search normally re-reads just the vectors indexed since the previous one.
- * The newest 2,000 vectors are kept, which is what an order-by-recency window
- * of this size means for accounts above the ceiling.
- */
+
 export const MAX_SEMANTIC_VECTORS = 2_000
 const SEMANTIC_TOP_K = 40
 const DRAIN_USERS_PER_RUN = 10
@@ -108,19 +88,14 @@ export async function isAiSearchEnabled(db: D1Database, userId: string): Promise
   return await getMeta(db, aiSearchPrefKey(userId)) === '1'
 }
 
-// Stored in app_meta instead of a column on mcp_preferences: D1 does not
-// reliably support ALTER TABLE ADD COLUMN with constraints, and app_meta
-// exists on every database without any migration.
+
+
+
 function aiSearchPrefKey(userId: string): string {
   return `ai-search-enabled:${userId}`
 }
 
-/**
- * Queues a note for embedding (or vector deletion). The single row per note
- * uses last-write-wins semantics: a delete supersedes a pending embed and
- * vice versa. Queuing is skipped entirely while the account has AI search
- * disabled, except deletions which always clean up stale vectors.
- */
+
 export async function enqueueNoteIndex(
   db: D1Database,
   userId: string,
@@ -152,12 +127,7 @@ export function noteIndexQueueStatement(
     : statement.bind(userId, noteId, kind, now)
 }
 
-/**
- * True when a write leaves the embedded text (title plus the head of the body)
- * unchanged, so the note does not have to be queued for embedding again. A
- * long note edited past that head keeps its vector, which is what the previous
- * drain would have computed for it anyway.
- */
+
 export function embedTextUnchanged(
   previous: { title: string; content: string },
   next: { title: string; content: string },
@@ -219,12 +189,7 @@ export async function clearAiIndex(db: D1Database, userId: string): Promise<numb
   return row?.n ?? 0
 }
 
-/**
- * Processes queued embedding jobs. Called from the hourly cron with a large
- * budget and from write paths (via waitUntil) with a small one. Items are
- * processed sequentially so Workers AI rate limits are respected; a failing
- * item stops the batch and is retried on the next run.
- */
+
 export async function drainAiIndexQueue(env: Env, max: number): Promise<{ processed: number }> {
   if (!env.AI) return { processed: 0 }
   const budget = Math.max(0, Math.trunc(max))
@@ -239,7 +204,7 @@ export async function drainAiIndexQueue(env: Env, max: number): Promise<{ proces
   for (const user_id of users) {
     if (processed >= budget) break
     if (!await isAiSearchEnabled(env.DB, user_id)) {
-      // The account turned AI search off; its queue would otherwise grow forever.
+
       await env.DB.prepare(`DELETE FROM ai_index_queue WHERE user_id = ?1`).bind(user_id).run()
       continue
     }
@@ -330,22 +295,14 @@ async function processQueueItem(env: Env, userId: string, item: QueueRow): Promi
   ])
 }
 
-/**
- * How many scored candidates are hydrated with note metadata. The window is
- * twice the result size so the `updated_at` tie-break still sees every note
- * that can reach the result list.
- */
+
 const SEMANTIC_HYDRATE_CANDIDATES = SEMANTIC_TOP_K * 2
 
-/**
- * Candidate-cache tunables. The cache holds decoded vectors per account and
- * filter combination inside one isolate; `MAX(indexed_at)` validates it, so a
- * TTL only bounds how long an unused entry may keep its memory.
- */
+
 export const SEMANTIC_CACHE_IDLE_TTL_MS = 5 * 60_000
 export const SEMANTIC_CACHE_MAX_ENTRIES = 4
 export const SEMANTIC_CACHE_MAX_BYTES = 24 * 1024 * 1024
-/** Rows re-read to refresh a cached candidate set before falling back to a full load. */
+
 export const SEMANTIC_CACHE_DELTA_ROWS = 200
 
 interface SemanticCandidate {
@@ -377,29 +334,19 @@ interface SemanticNoteRow {
 
 const semanticCandidateCache = new Map<string, SemanticCandidateEntry>()
 
-/** Drops every cached candidate set; tests use it to isolate runs. */
+
 export function clearSemanticCandidateCache(): void {
   semanticCandidateCache.clear()
 }
 
-/** Cache key for one account and filter combination. */
+
 export function semanticCacheKey(userId: string, filters: SemanticFilters): string {
   const tags = [...new Set((filters.tags ?? []).map((tag) => tag.toLowerCase()))].sort()
   const shape = [tags, filters.folder ?? null, filters.starred ?? null, filters.archived ?? null]
   return `${userId}\u0000${JSON.stringify(shape)}`
 }
 
-/**
- * Semantic retrieval over the account's embedding index. Returns null when
- * AI is unavailable or the query embedding fails; the caller degrades to
- * lexical search.
- *
- * D1 cost per call, cheapest first: the account's vectors are pulled without
- * a `notes` join and only for the columns the scorer reads, cached per isolate
- * and refreshed from the rows indexed since the previous call; note metadata
- * (title, excerpt, rev, updated_at) is then fetched for the shortlist that can
- * reach the result window, not for every candidate vector.
- */
+
 export async function searchSemanticNotes(
   env: Env,
   db: D1Database,
@@ -441,7 +388,7 @@ export async function searchSemanticNotes(
       score,
     })
   }
-  // `updated_at` tie-break, matching the previous ranking contract.
+
   return hits.sort((a, b) =>
     b.score - a.score ||
     b.updatedAt - a.updatedAt ||
@@ -449,11 +396,7 @@ export async function searchSemanticNotes(
   )
 }
 
-/**
- * Returns the account's candidates for these filters, reusing the isolate
- * cache when `MAX(indexed_at)` shows nothing new and otherwise appending only
- * the rows indexed since the cached snapshot.
- */
+
 async function loadSemanticCandidates(
   db: D1Database,
   userId: string,
@@ -500,12 +443,7 @@ async function readSemanticVersion(db: D1Database, userId: string): Promise<numb
   return row?.version ?? 0
 }
 
-/**
- * Vector rows for one account, newest first. The account's notes are only
- * joined when the query actually filters on note attributes, and then as an
- * existence probe on the primary key — the candidate projection never carries
- * note columns.
- */
+
 async function readSemanticVectorRows(
   db: D1Database,
   userId: string,
@@ -514,14 +452,14 @@ async function readSemanticVectorRows(
   limit: number,
 ): Promise<SemanticVectorRow[]> {
   const binds: unknown[] = [userId]
-  // CKCZ-23: vectors are keyed by note owner; shared-folder notes owned by
-  // another member are eligible when that folder is shared with `userId`.
+
+
   let where = `(e.user_id = ?1 OR e.user_id IN (
     SELECT fs.owner_user_id FROM folder_shares fs
     JOIN folders sf ON sf.id = fs.folder_id AND sf.deleted_at IS NULL AND sf.user_id = fs.owner_user_id
     WHERE fs.grantee_user_id = ?1))`
-  // Always apply note access + optional filters. `noteAccessSql` needs the
-  // user bind; it re-checks shared scope per note before it can rank.
+
+
   const clause = noteFilterClause('n', filters, 2)
   where += ` AND EXISTS (SELECT 1 FROM notes n
     WHERE n.id = e.note_id AND n.user_id = e.user_id
@@ -544,7 +482,7 @@ async function readSemanticVectorRows(
   return results
 }
 
-/** Note metadata for the shortlist only. */
+
 async function hydrateSemanticNotes(
   db: D1Database,
   userId: string,
@@ -552,7 +490,7 @@ async function hydrateSemanticNotes(
   filters: SemanticFilters,
 ): Promise<SemanticNoteRow[]> {
   if (!ids.length) return []
-  // ?1 is the account, ?2 the id list; filter placeholders follow them.
+
   const clause = noteFilterClause('n', filters, 3)
   const { results } = await db
     .prepare(
@@ -581,11 +519,7 @@ function buildSemanticCandidateEntry(
   return { candidates, version, usedAt, bytes: semanticCandidatesBytes(candidates) }
 }
 
-/**
- * Folds rows indexed since the cached snapshot into it. Rows already cached
- * are replaced in place (re-embeds), new ones are merged by `indexed_at` so
- * the newest `MAX_SEMANTIC_VECTORS` survive and the order stays newest-first.
- */
+
 function mergeSemanticCandidates(
   cached: SemanticCandidateEntry,
   rows: readonly SemanticVectorRow[],
@@ -627,10 +561,7 @@ function storeSemanticCache(key: string, entry: SemanticCandidateEntry): void {
   pruneSemanticCache(key, entry.usedAt)
 }
 
-/**
- * Keeps the most recently used entries inside the entry-count and byte
- * budgets, and drops entries untouched for `SEMANTIC_CACHE_IDLE_TTL_MS`.
- */
+
 function pruneSemanticCache(keepKey: string, now: number): void {
   let total = 0
   for (const [key, entry] of semanticCandidateCache) {
@@ -656,11 +587,7 @@ export function semanticCacheStats(): { entries: number; bytes: number } {
   return { entries: semanticCandidateCache.size, bytes }
 }
 
-/**
- * Note-attribute filters over one alias, with placeholders starting at
- * `start`. Shared by the candidate probe and the metadata hydration so both
- * apply exactly the same filter contract.
- */
+
 function noteFilterClause(
   alias: string,
   filters: SemanticFilters,
@@ -685,11 +612,7 @@ function noteFilterClause(
   return { sql, binds }
 }
 
-/**
- * Reciprocal-rank fusion: merges two ranked lists into one by rank, so a
- * note that ranks well in both lexical and semantic search surfaces above
- * one that only appears in a single index.
- */
+
 export interface FusedHit<T> {
   item: T
   rrf: number
@@ -724,13 +647,13 @@ export function fuseByRrf<T extends { id: string }>(
   )
 }
 
-/** Calls the Workers AI embedding model and returns a Float32Array. */
+
 export async function embedText(ai: NonNullable<Env['AI']>, text: string): Promise<Float32Array> {
   const result = await ai.run(AI_EMBEDDING_MODEL, { text: [text] })
   return extractEmbedding(result)
 }
 
-/** Handles both the `{ data: [{ embedding }] }` and `{ shape, data }` shapes. */
+
 export function extractEmbedding(result: unknown): Float32Array {
   const data = (result as { data?: unknown } | null)?.data
   if (Array.isArray(data)) {

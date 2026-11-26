@@ -29,8 +29,8 @@ foldersRoutes.get('/', async (c) => {
   )
     .bind(userId)
     .all<FolderRow>()
-  // CKCZ-23: union of owned + shared folders. Shared folders keep the
-  // owner's name/icon/color; `shared` + `shareRole` mark their provenance.
+
+
   const { results: shared } = await c.env.DB.prepare(
     `SELECT ${FOLDER_SELECT}, fs.role AS share_role, f.user_id AS owner_user_id,
        u.name AS owner_name, u.login AS owner_login
@@ -353,7 +353,7 @@ foldersRoutes.delete('/:id', async (c) => {
         `DELETE FROM folders WHERE id = ?1 AND user_id = ?2 AND updated_at = ?3
           AND deleted_at = ?4`,
       ).bind(id, userId, row.updated_at, now),
-      // CKCZ-23: drop shares on a removed folder.
+
       c.env.DB.prepare(
         `DELETE FROM folder_shares WHERE folder_id = ?1 AND owner_user_id = ?2`,
       ).bind(id, userId),
@@ -682,9 +682,9 @@ function subtreeHeight(graph: FolderGraph, rootId: string): number {
   return height
 }
 
-// ---------------------------------------------------------------------------
-// CKCZ-23: folder sharing — grant create/list/revoke. Owner-only.
-// ---------------------------------------------------------------------------
+
+
+
 
 interface ShareGranteeRow {
   id: string
@@ -730,7 +730,7 @@ async function listFolderShares(db: D1Database, folderId: string): Promise<Folde
   }))
 }
 
-// POST /api/folders/:id/shares { granteeId | grantee, role }
+
 foldersRoutes.post('/:id/shares', async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')
@@ -748,8 +748,8 @@ foldersRoutes.post('/:id/shares', async (c) => {
   if (granteeRef.length > 128) throw ApiError.badRequest('granteeId is too long')
   if (!isFolderShareRole(body.role)) throw ApiError.badRequest('role must be read or write')
 
-  // Resolve grantee by user id, username, or login. Data-level: the caller
-  // names an existing member; nothing inside a note can authorize this.
+
+
   const grantee = await c.env.DB.prepare(
     `SELECT id, name, login FROM users
       WHERE id = ?1 OR username = ?1 COLLATE NOCASE OR login = ?1 COLLATE NOCASE
@@ -764,7 +764,7 @@ foldersRoutes.post('/:id/shares', async (c) => {
      ON CONFLICT(folder_id, grantee_user_id) DO UPDATE SET role = excluded.role`,
   ).bind(folder.id, userId, grantee.id, body.role).run()
 
-  // Notify the grantee's sync stream that a folder appeared.
+
   await c.env.DB.prepare(
     `INSERT INTO changes (user_id, entity, entity_id, op, at) VALUES (?1, 'folder', ?2, 'upsert', ?3)`,
   ).bind(grantee.id, folder.id, Date.now()).run()
@@ -775,7 +775,7 @@ foldersRoutes.post('/:id/shares', async (c) => {
   return c.json({ share, shares }, 201)
 })
 
-// GET /api/folders/:id/shares
+
 foldersRoutes.get('/:id/shares', async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')
@@ -783,7 +783,7 @@ foldersRoutes.get('/:id/shares', async (c) => {
   return c.json({ shares: await listFolderShares(c.env.DB, id) })
 })
 
-// DELETE /api/folders/:id/shares/:granteeId
+
 foldersRoutes.delete('/:id/shares/:granteeId', async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')

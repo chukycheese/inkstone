@@ -1,16 +1,4 @@
-/**
- * CKCZ-23: folder-level sharing ("Shared" folders).
- *
- * `folder_shares(folder_id, owner_user_id, grantee_user_id, role)` grants a
- * member read or write access to one folder. Access is additive on top of the
- * existing per-user isolation: every query still checks `user_id`, and a
- * second branch admits rows whose folder carries a share for the caller.
- *
- * Ownership never moves: shared notes stay owned by the note owner, version
- * history stays keyed to the owner, and owner-only operations (delete/trash/
- * purge/restore, folder management, share management) remain owner-only.
- * Grantee write access covers editing shared notes, not deleting them.
- */
+
 
 export type FolderShareRole = 'read' | 'write'
 
@@ -25,12 +13,7 @@ export function isFolderShareRole(value: unknown): value is FolderShareRole {
   return value === 'read' || value === 'write'
 }
 
-/**
- * SQL boolean: the note aliased `alias` is visible to the user bound at
- * `userBind`. A note is shared when its folder is shared with the user by a
- * live folder share owned by the folder owner. Trashed notes are never
- * shared, and unfiled notes (folder_id NULL) can never be shared.
- */
+
 export function noteSharedScopeSql(alias: string, userBind: string): string {
   return `EXISTS (
     SELECT 1 FROM folder_shares fs
@@ -42,15 +25,12 @@ export function noteSharedScopeSql(alias: string, userBind: string): string {
   )`
 }
 
-/** SQL boolean: `userBind` may read note `alias` (owner or any shared role). */
+
 export function noteAccessSql(alias: string, userBind: string): string {
   return `(${alias}.user_id = ${userBind} OR ${noteSharedScopeSql(alias, userBind)})`
 }
 
-/**
- * SQL boolean: `userBind` may edit note `alias`. Owner, or a shared grantee
- * whose folder share has role = 'write'. Never implies delete.
- */
+
 export function noteWriteAccessSql(alias: string, userBind: string): string {
   return `(
     ${alias}.user_id = ${userBind}
@@ -66,7 +46,7 @@ export function noteWriteAccessSql(alias: string, userBind: string): string {
   )`
 }
 
-/** SQL boolean: `userBind` may read folder `alias`. */
+
 export function folderAccessSql(alias: string, userBind: string): string {
   return `(
     ${alias}.user_id = ${userBind}
@@ -78,7 +58,7 @@ export function folderAccessSql(alias: string, userBind: string): string {
   )`
 }
 
-/** SQL boolean: `userBind` may edit notes in folder `alias`. */
+
 export function folderWriteAccessSql(alias: string, userBind: string): string {
   return `(
     ${alias}.user_id = ${userBind}
@@ -90,11 +70,7 @@ export function folderWriteAccessSql(alias: string, userBind: string): string {
   )`
 }
 
-/**
- * Shared folder scope for a note query. `userBind` is the caller bind;
- * `noteUserBind` (optional) overrides where `user_id` lives when it differs
- * from `noteSharedScopeSql`'s `alias.user_id`.
- */
+
 export async function sharedFolderIds(db: D1Database, userId: string): Promise<string[]> {
   const { results } = await db
     .prepare(
@@ -107,7 +83,7 @@ export async function sharedFolderIds(db: D1Database, userId: string): Promise<s
   return results.map((row) => row.folder_id)
 }
 
-/** Owner user ids whose shared folders are visible to `userId`. */
+
 export async function sharedOwnerIds(db: D1Database, userId: string): Promise<string[]> {
   const { results } = await db
     .prepare(
@@ -120,7 +96,7 @@ export async function sharedOwnerIds(db: D1Database, userId: string): Promise<st
   return results.map((row) => row.owner_user_id)
 }
 
-/** Role of a folder share for `granteeUserId`, or null when not shared. */
+
 export async function folderShareRole(
   db: D1Database,
   folderId: string,

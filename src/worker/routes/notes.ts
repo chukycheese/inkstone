@@ -67,8 +67,8 @@ notesRoutes.get('/', async (c) => {
   const cursor = parseNotesListCursor(c.req.query('cursor'), view, sort, order)
 
   const binds: unknown[] = [userId]
-  // CKCZ-23: owned + shared folder notes. Trash stays owner-only because the
-  // shared branch never matches trashed notes.
+
+
   let where = noteAccessSql('n', '?1')
 
   if (view === 'trash') {
@@ -255,7 +255,7 @@ notesRoutes.post('/trash/empty', async (c) => {
 
 
 notesRoutes.get('/:id', async (c) => {
-  // CKCZ-23: grantee with read or write on the shared folder may read.
+
   const note = await loadNote(c.env.DB, c.get('userId'), c.req.param('id'))
   return c.json(note)
 })
@@ -366,8 +366,8 @@ notesRoutes.patch('/:id', async (c) => {
       .first<{ seq: number | null }>()
     throw ApiError.notFound('Note not found', { deletionCursor: deletion?.seq ?? null })
   }
-  // CKCZ-23: read-role shared grantees may read but not write. Note
-  // ownership never moves; shared write never grants delete.
+
+
   const isOwner = row.user_id === actorUserId
   if (!isOwner) {
     const canWrite = await c.env.DB.prepare(
@@ -375,8 +375,8 @@ notesRoutes.patch('/:id', async (c) => {
     ).bind(id, actorUserId).first<{ ok: number }>()
     if (!canWrite) throw ApiError.forbidden('You have read-only access to this shared note')
   }
-  // The note owner is the `user_id` key for versions, derived rows, FTS,
-  // embeddings, links, and change records — shared edits hit the original.
+
+
   const noteUserId = row.user_id
 
   if (!Number.isInteger(body.rev) || body.rev < 1) {
@@ -405,7 +405,7 @@ notesRoutes.patch('/:id', async (c) => {
       throw ApiError.badRequest(`${key} must be a boolean`)
     }
   }
-  // CKCZ-23: folder reorganization is owner-only; a grantee edits content.
+
   if (!isOwner && body.folderId !== undefined && body.folderId !== row.folder_id) {
     throw ApiError.forbidden('Shared grantees cannot move notes between folders')
   }
@@ -582,13 +582,13 @@ notesRoutes.patch('/:id', async (c) => {
   }
   await broadcastCursor(c, rewroteInbound ? undefined : changeResult?.results?.[0]?.seq)
   if (isOwner === false) {
-    // CKCZ-23: shared edits land on the owner's original — notify the owner.
+
     const waitUntil = (task: Promise<unknown>) => { c.executionCtx?.waitUntil(task) }
     await broadcastUserCursor(c.env, noteUserId, originOf(c), undefined, waitUntil).catch(() => {})
   }
   if (contentChanged || newTitle !== row.title) {
-    // An edit that leaves the embedded head of the note alone (typing at the
-    // end of a long note) does not need a new embedding queue write.
+
+
     const embedNeeded = !embedTextUnchanged(
       { title: row.title, content: row.content },
       { title: newTitle, content: newContent },
@@ -858,7 +858,7 @@ notesRoutes.post('/:id/duplicate', async (c) => {
 
 
 notesRoutes.get('/:id/versions', async (c) => {
-  // CKCZ-23: read access to the note exposes its preserved history.
+
   const note = await loadNoteRow(c.env.DB, c.get('userId'), c.req.param('id'))
   const { results } = await c.env.DB.prepare(
     `SELECT id, note_id, title, length(CAST(content AS BLOB)) AS size, created_at FROM note_versions
@@ -1013,7 +1013,7 @@ async function loadNote(db: D1Database, userId: string, id: string): Promise<Not
   return toNote(await loadNoteRow(db, userId, id))
 }
 
-/** CKCZ-23: load a note the caller may read (owner or shared grantee). */
+
 async function loadNoteRow(db: D1Database, userId: string, id: string): Promise<NoteRow> {
   const row = await db
     .prepare(`SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')}`)
@@ -1023,7 +1023,7 @@ async function loadNoteRow(db: D1Database, userId: string, id: string): Promise<
   return row
 }
 
-/** Owner-only note load; shared grantees do not pass. */
+
 async function loadOwnedNoteRow(db: D1Database, userId: string, id: string): Promise<NoteRow> {
   const row = await db
     .prepare(`SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND n.user_id = ?2`)

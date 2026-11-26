@@ -18,7 +18,7 @@ import {
 const FETCH_MAX_CHARS = 80_000
 const READ_DEFAULT_CHARS = 12_000
 const READ_MAX_CHARS = 40_000
-// CKCZ-26: capped lexical fallback window for the semantic-first path.
+
 export const SEARCH_CANDIDATES = 20
 const HYBRID_CANDIDATES = 24
 
@@ -67,16 +67,16 @@ export async function searchMcpNotes(
   const limit = Math.max(1, Math.min(20, options.limit ?? 8))
   const mode = options.mode ?? 'auto'
 
-  // CKCZ-26: per-user daily search-call guard, same 429 style as the HTTP
-  // search route (safeTool surfaces the ApiError to the MCP caller).
+
+
   const budget = await tryConsumeSearchBudgetCall(env.DB, userId, 'mcp-search')
   if (!budget.allowed) {
     throw new ApiError(429, 'too_many_attempts', `Daily search budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
   }
 
-  // CKCZ-26: semantic-first. The old code always ran the lexical (FTS/LIKE)
-  // scan before even trying semantic; now semantic runs first and the D1
-  // lexical scan only runs as a capped fallback (or for explicit hybrid).
+
+
+
   const wantsSemantic = mode === 'auto' || mode === 'hybrid' || mode === 'semantic'
   let semanticHits: SemanticSearchHit[] | null = null
   if (wantsSemantic) {
@@ -88,13 +88,13 @@ export async function searchMcpNotes(
         archived: options.archived,
       })
     } catch (error) {
-      // AI unavailable, rate-limited, or malformed response: degrade to lexical.
+
       console.warn('[inkstone] Semantic search unavailable; using lexical:', error instanceof Error ? error.message : error)
       semanticHits = null
     }
   }
 
-  // Semantic hit on the default path: skip the lexical D1 scan entirely.
+
   if (mode === 'auto' && semanticHits?.length) {
     return {
       results: semanticHits.slice(0, Math.min(limit, HYBRID_CANDIDATES)).map((hit) => ({
@@ -112,11 +112,11 @@ export async function searchMcpNotes(
   }
 
   const lexicalQuery = composeLexicalQuery(options)
-  // CKCZ-31: never drain the FTS queue inline here. Draining re-indexes up
-  // to 50 queued notes (full-content reads + FTS writes) per search, so a
-  // mass MCP session of hundreds of searches/edits multiplies rows-read per
-  // call. Indexing is covered by the hourly cron drain plus the write-path
-  // scheduled drain — same split the HTTP search route already uses.
+
+
+
+
+
   const lexicalHits: LexicalHit[] =
     mode === 'semantic' && semanticHits?.length
       ? []
@@ -419,9 +419,9 @@ export async function listMcpNotes(
 }
 
 export async function listMcpFolders(db: D1Database, userId: string): Promise<Record<string, unknown>> {
-  // CKCZ-23: owned + shared folders. note_count counts notes the caller can
-  // see: for owned folders all notes; for shared folders notes visible to
-  // the caller (notes in a shared folder are all shared).
+
+
+
   const { results } = await db.prepare(
     `SELECT f.id, f.parent_id, f.name, f.position, shared.shared,
             (SELECT COUNT(*) FROM notes n

@@ -1,8 +1,4 @@
-/**
- * CKCZ-23: folder-level sharing — grant CRUD, access control, search
- * inclusion, shared edits preserving ownership + version history, and
- * owner-only delete.
- */
+
 import { Hono } from 'hono'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AppBindings } from '../src/worker/env'
@@ -26,7 +22,7 @@ function makeApp(userId: string): Hono<AppBindings> {
   app.use('*', async (c, next) => {
     c.set('userId', userId)
     c.set('database', { ftsEnabled: true })
-    // @ts-expect-error test env injection
+
     c.env = { ...(c.env ?? {}), DB: db }
     await next()
   })
@@ -86,9 +82,9 @@ beforeEach(() => {
   ).run(NOTE, OWNER, FOLDER)
 })
 
-// ---------------------------------------------------------------------------
-// grant CRUD
-// ---------------------------------------------------------------------------
+
+
+
 describe('folder share grant API', () => {
   it('creates, lists, and revokes a share (owner-only)', async () => {
     const create = await call(OWNER, 'POST', `/api/folders/${FOLDER}/shares`, { granteeId: GRANTEE, role: 'read' })
@@ -99,7 +95,7 @@ describe('folder share grant API', () => {
     expect(list.status).toBe(200)
     expect(list.json.shares).toHaveLength(1)
 
-    // non-owner cannot manage shares
+
     expect((await call(GRANTEE, 'POST', `/api/folders/${FOLDER}/shares`, { granteeId: OTHER, role: 'read' })).status).toBe(404)
     expect((await call(GRANTEE, 'GET', `/api/folders/${FOLDER}/shares`)).status).toBe(404)
     expect((await call(GRANTEE, 'DELETE', `/api/folders/${FOLDER}/shares/${OTHER}`)).status).toBe(404)
@@ -125,9 +121,9 @@ describe('folder share grant API', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// folder list + note list + read
-// ---------------------------------------------------------------------------
+
+
+
 describe('shared folder visibility', () => {
   it('GET /folders includes shared folders for grantee, not for others', async () => {
     await grant('read')
@@ -163,9 +159,9 @@ describe('shared folder visibility', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// write access + ACL
-// ---------------------------------------------------------------------------
+
+
+
 describe('shared write access', () => {
   it('read-role grantee cannot PATCH', async () => {
     await grant('read')
@@ -181,21 +177,21 @@ describe('shared write access', () => {
     expect(res.status).toBe(200)
     expect(res.json.content).toBe('edited by grantee')
 
-    // owner sees the edit on the original note, still owned by owner
+
     const ownerView = await call(OWNER, 'GET', `/api/notes/${NOTE}`)
     expect(ownerView.json.content).toBe('edited by grantee')
     const row = db.db.prepare('SELECT user_id, rev FROM notes WHERE id = ?').get(NOTE) as any
     expect(row.user_id).toBe(OWNER)
     expect(row.rev).toBe(2)
 
-    // note_versions history preserved, keyed to owner
+
     const versions = await call(OWNER, 'GET', `/api/notes/${NOTE}/versions`)
     expect(versions.json.versions.length).toBeGreaterThan(0)
     const vrow = db.db.prepare('SELECT user_id, content FROM note_versions WHERE note_id = ?').get(NOTE) as any
     expect(vrow.user_id).toBe(OWNER)
     expect(vrow.content).toBe('quantum wombat research')
 
-    // grantee can read history too
+
     const granteeVersions = await call(GRANTEE, 'GET', `/api/notes/${NOTE}/versions`)
     expect(granteeVersions.json.versions.length).toBeGreaterThan(0)
   })
@@ -210,7 +206,7 @@ describe('shared write access', () => {
     expect((await call(GRANTEE, 'DELETE', `/api/notes/${NOTE}`)).status).toBe(404)
     expect((await call(GRANTEE, 'DELETE', `/api/notes/${NOTE}/purge`)).status).toBe(404)
     expect((await call(GRANTEE, 'POST', `/api/notes/${NOTE}/restore`, {})).status).toBe(404)
-    // note still exists for owner
+
     expect((await call(OWNER, 'GET', `/api/notes/${NOTE}`)).status).toBe(200)
   })
 
@@ -221,9 +217,9 @@ describe('shared write access', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// search inclusion (lexical FTS + LIKE)
-// ---------------------------------------------------------------------------
+
+
+
 describe('search includes shared notes', () => {
   it('lexical search finds shared note for grantee', async () => {
     await grant('read')

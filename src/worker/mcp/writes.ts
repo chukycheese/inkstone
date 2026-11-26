@@ -115,7 +115,7 @@ export async function editMcpNote(
     request: input,
     recovery: { noteId: input.noteId, expectedRev: input.expectedRev },
     execute: async () => {
-      // CKCZ-23: shared grantee with write role may edit; read-only cannot.
+
       const current = await loadNoteRow(context.env.DB, context.userId, input.noteId)
       assertExpectedRevision(current, input.expectedRev)
       if (current.deleted_at !== null) throw ApiError.notFound('The note is in the trash')
@@ -153,7 +153,7 @@ export async function organizeMcpNote(
       assertExpectedRevision(current, input.expectedRev)
       if (current.deleted_at !== null) throw ApiError.notFound('The note is in the trash')
       await assertNoteWriteAccess(context.env.DB, context.userId, input.noteId)
-      // CKCZ-23: shared grantees cannot re-file; ownership stays put.
+
       if (Object.prototype.hasOwnProperty.call(input, 'folderId') && current.user_id !== context.userId) {
         throw ApiError.forbidden('Shared grantees cannot move notes between folders')
       }
@@ -179,7 +179,7 @@ export async function trashMcpNote(
     request: input,
     recovery: { noteId: input.noteId, expectedRev: input.expectedRev },
     execute: async () => {
-      // CKCZ-23: trash (delete) is owner-only; shared write never grants it.
+
       const row = await loadOwnedNoteRow(context.env.DB, context.userId, input.noteId)
       assertExpectedRevision(row, input.expectedRev)
       if (row.deleted_at !== null) throw ApiError.notFound('The note is already in the trash')
@@ -238,7 +238,7 @@ export async function restoreMcpNote(
     request: input,
     recovery: { noteId: input.noteId, expectedRev: input.expectedRev },
     execute: async () => {
-      // CKCZ-23: restoring from trash is owner-only.
+
       const row = await loadOwnedNoteRow(context.env.DB, context.userId, input.noteId)
       assertExpectedRevision(row, input.expectedRev)
       if (row.deleted_at === null) throw ApiError.badRequest('The note is not in the trash')
@@ -328,8 +328,8 @@ async function patchNote(
   if (patch.isArchived !== undefined && Number(patch.isArchived) !== row.is_archived) push(sets, binds, 'is_archived', patch.isArchived ? 1 : 0)
   if (!sets.length) return toNote(row)
 
-  // CKCZ-23: `user_id` key for versions, derived rows, FTS, and changes is
-  // the note owner; shared edits land on the owner's original note.
+
+
   const noteUserId = row.user_id
   push(sets, binds, 'updated_at', now)
   const nextRev = row.rev + 1
@@ -491,7 +491,7 @@ async function loadOwnedNoteRow(db: D1Database, userId: string, id: string): Pro
   return row
 }
 
-/** CKCZ-23: throw 403 unless `userId` may edit this note. */
+
 async function assertNoteWriteAccess(db: D1Database, userId: string, noteId: string): Promise<void> {
   const row = await db.prepare(
     `SELECT 1 AS ok FROM notes n WHERE n.id = ?1 AND ${noteWriteAccessSql('n', '?2')}`,

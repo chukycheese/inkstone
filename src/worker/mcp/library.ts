@@ -26,10 +26,7 @@ interface LibraryContext extends McpWriteContext {
   origin: string
 }
 
-/**
- * CKCZ-31: per-request full-content row ceiling for property queries (was
- * an uncapped-feeling 500). Each scanned row pulls the whole note body.
- */
+
 export const MCP_PROPERTY_SCAN_LIMIT = 200
 
 interface FolderRow {
@@ -70,7 +67,7 @@ export async function listMcpNoteVersions(
   noteId: string,
   limit = 20,
 ) {
-  // CKCZ-23: read access to a shared note exposes preserved history.
+
   const ownerUserId = await requireNoteReadAccess(db, userId, noteId)
   const { results } = await db.prepare(
     `SELECT id, title, size, created_at FROM note_versions
@@ -197,9 +194,9 @@ export async function queryMcpNoteProperties(
     limit?: number
   },
 ) {
-  // CKCZ-31: this path reads every scanned note's full content (giant table
-  // notes included), so an uncapped full-library scan per call is the
-  // fastest way a mass MCP session burns the daily rows-read quota.
+
+
+
   const budget = await tryConsumeSearchBudgetCall(db, userId, 'property-query')
   if (!budget.allowed) {
     throw new ApiError(429, 'too_many_attempts', `Daily search budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
@@ -1074,7 +1071,7 @@ function duplicateTitle(title: string): string {
   return `${base.slice(0, Math.max(0, LIMITS.titleMaxLength - suffix.length))}${suffix}`
 }
 
-/** CKCZ-23: owner or shared read access; returns the note owner's user id. */
+
 async function requireNoteReadAccess(db: D1Database, userId: string, noteId: string): Promise<string> {
   const row = await db.prepare(
     `SELECT n.user_id FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')}`,

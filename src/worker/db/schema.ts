@@ -1,4 +1,4 @@
-/** Defines the idempotent final D1 schema initialized by every Worker isolate. */
+
 import type { DatabaseState, Env } from '../env'
 import { getMeta, setMeta } from './metadata'
 
@@ -368,8 +368,8 @@ interface SchemaMigration {
 
 const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
   {
-    // Explicit whitelist (not a regex over SCHEMA_STATEMENTS) so later
-    // additions like mcp_api_keys can never be picked up accidentally.
+
+
     version: 1,
     statements: [
       `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -396,10 +396,10 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
     ],
   },
   {
-    // Only CREATE TABLE / INDEX statements: D1 does not reliably support
-    // ALTER TABLE ADD COLUMN with constraints, so the AI search preference
-    // lives in app_meta (key `ai-search-enabled:<userId>`) instead of a
-    // new column on the pre-existing mcp_preferences table.
+
+
+
+
     version: 2,
     statements: [
       `CREATE TABLE IF NOT EXISTS mcp_api_keys (
@@ -565,8 +565,8 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
     ],
   },
   {
-    // CKCZ-23: folder-level sharing. Additive CREATE TABLE; existing rows
-    // are untouched and user_id isolation is preserved for non-shared data.
+
+
     version: 15,
     statements: [
       `CREATE TABLE IF NOT EXISTS folder_shares (
@@ -741,9 +741,9 @@ async function createSchema(db: D1Database): Promise<DatabaseState> {
   if (!initialized) {
     await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)))
   } else {
-    // Existing installations must converge additively. CREATE IF NOT EXISTS
-    // never rewrites user data; running table creation before indexes also
-    // lets a partially initialized database recover missing feature tables.
+
+
+
     await db.batch(TABLE_SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)))
   }
   await applyMigrations(db)
@@ -778,8 +778,8 @@ async function upgradeFtsIdentifiers(db: D1Database): Promise<void> {
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes_fts'`,
   ).first<{ sql: string }>()
   if (!table || !/note_id\s+UNINDEXED/i.test(table.sql)) return
-  // Keep the existing indexed text and rowids. The batch either replaces the
-  // complete index or rolls back, including when an old installation retries.
+
+
   await db.batch([
     db.prepare(FTS_STATEMENT.replace('notes_fts', 'notes_fts_identifiers')),
     db.prepare(`INSERT INTO notes_fts_identifiers (rowid, note_id, user_id, title, body)
