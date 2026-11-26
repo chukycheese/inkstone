@@ -13,6 +13,7 @@ import { broadcastUserCursor } from '../lib/notify'
 import { assertContentSize } from '../lib/request'
 import { embedTextUnchanged, enqueueNoteIndex } from './ai-search'
 import { runIdempotent } from './operations'
+import { noteAccessSql, noteWriteAccessSql } from '../db/shared'
 import { buildOutline } from './retrieval'
 
 export type NoteEditOperation = 'replace' | 'replace_section' | 'append' | 'prepend' | 'replace_all'
@@ -114,9 +115,11 @@ export async function editMcpNote(
     request: input,
     recovery: { noteId: input.noteId, expectedRev: input.expectedRev },
     execute: async () => {
+
       const current = await loadNoteRow(context.env.DB, context.userId, input.noteId)
       assertExpectedRevision(current, input.expectedRev)
       if (current.deleted_at !== null) throw ApiError.notFound('The note is in the trash')
+      await assertNoteWriteAccess(context.env.DB, context.userId, input.noteId)
       const content = applyEdit(current.content, input)
       return patchNote(context, current, {
         content,
@@ -149,6 +152,11 @@ export async function organizeMcpNote(
       const current = await loadNoteRow(context.env.DB, context.userId, input.noteId)
       assertExpectedRevision(current, input.expectedRev)
       if (current.deleted_at !== null) throw ApiError.notFound('The note is in the trash')
+      await assertNoteWriteAccess(context.env.DB, context.userId, input.noteId)
+
+      if (Object.prototype.hasOwnProperty.call(input, 'folderId') && current.user_id !== context.userId) {
+        throw ApiError.forbidden('Shared grantees cannot move notes between folders')
+      }
       return patchNote(context, current, {
         ...(Object.prototype.hasOwnProperty.call(input, 'folderId') ? { folderId: input.folderId } : {}),
         ...(input.starred !== undefined ? { isStarred: input.starred } : {}),
@@ -171,7 +179,8 @@ export async function trashMcpNote(
     request: input,
     recovery: { noteId: input.noteId, expectedRev: input.expectedRev },
     execute: async () => {
-      const row = await loadNoteRow(context.env.DB, context.userId, input.noteId)
+
+      const row = await loadOwnedNoteRow(context.env.DB, context.userId, input.noteId)
       assertExpectedRevision(row, input.expectedRev)
       if (row.deleted_at !== null) throw ApiError.notFound('The note is already in the trash')
       const now = Math.max(Date.now(), row.updated_at + 1)
@@ -229,7 +238,8 @@ export async function restoreMcpNote(
     request: input,
     recovery: { noteId: input.noteId, expectedRev: input.expectedRev },
     execute: async () => {
-      const row = await loadNoteRow(context.env.DB, context.userId, input.noteId)
+
+      const row = await loadOwnedNoteRow(context.env.DB, context.userId, input.noteId)
       assertExpectedRevision(row, input.expectedRev)
       if (row.deleted_at === null) throw ApiError.badRequest('The note is not in the trash')
       const now = Math.max(Date.now(), row.updated_at + 1)
@@ -311,17 +321,20 @@ async function patchNote(
     push(sets, binds, 'title', newTitle)
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'folderId') && patch.folderId !== row.folder_id) {
-    push(sets, binds, 'folder_id', await resolveFolderId(context.env.DB, context.userId, patch.folderId))
+    push(sets, binds, 'folder_id', await resolveFolderId(context.env.DB, row.user_id, patch.folderId))
   }
   if (patch.isPinned !== undefined && Number(patch.isPinned) !== row.is_pinned) push(sets, binds, 'is_pinned', patch.isPinned ? 1 : 0)
   if (patch.isStarred !== undefined && Number(patch.isStarred) !== row.is_starred) push(sets, binds, 'is_starred', patch.isStarred ? 1 : 0)
   if (patch.isArchived !== undefined && Number(patch.isArchived) !== row.is_archived) push(sets, binds, 'is_archived', patch.isArchived ? 1 : 0)
   if (!sets.length) return toNote(row)
 
+
+
+  const noteUserId = row.user_id
   push(sets, binds, 'updated_at', now)
   const nextRev = row.rev + 1
   push(sets, binds, 'rev', nextRev)
-  binds.push(row.id, context.userId, row.rev)
+  binds.push(row.id, noteUserId, row.rev)
   const update = context.env.DB.prepare(
     `UPDATE notes SET ${sets.join(', ')}
       WHERE id = ?${binds.length - 2} AND user_id = ?${binds.length - 1} AND rev = ?${binds.length}`,
@@ -329,7 +342,7 @@ async function patchNote(
   const mutationGuard = `EXISTS (SELECT 1 FROM notes
     WHERE id = ?1 AND user_id = ?2 AND rev = ?3
       AND content_hash = ?4 AND title = ?5 AND updated_at = ?6)`
-  const mutationValues = [row.id, context.userId, nextRev, newHash, newTitle, now] as const
+  const mutationValues = [row.id, noteUserId, nextRev, newHash, newTitle, now] as const
   const statements: D1PreparedStatement[] = [update]
 
   if (contentChanged && row.content) {
@@ -339,7 +352,7 @@ async function patchNote(
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
           WHERE ${shiftSqlPlaceholders(mutationGuard, 7)}`,
       ).bind(
-        newId(), row.id, context.userId, row.title, row.content,
+        newId(), row.id, noteUserId, row.title, row.content,
         utf8ByteLength(row.content), now, ...mutationValues,
       ),
       context.env.DB.prepare(
@@ -354,7 +367,7 @@ async function patchNote(
   if (contentChanged || newTitle !== row.title) {
     statements.push(...buildNoteDerivedStatements({
       db: context.env.DB,
-      userId: context.userId,
+      userId: noteUserId,
       noteId: row.id,
       title: newTitle,
       content: newContent,
@@ -373,7 +386,7 @@ async function patchNote(
           `DELETE FROM tags WHERE user_id = ?1 AND is_manual = 0
              AND ${shiftSqlPlaceholders(mutationGuard, 1)}
              AND NOT EXISTS (SELECT 1 FROM note_tags WHERE tag_id = tags.id)`,
-        ).bind(context.userId, ...mutationValues),
+        ).bind(noteUserId, ...mutationValues),
       )
     }
   }
@@ -382,7 +395,7 @@ async function patchNote(
       `INSERT INTO changes (user_id, entity, entity_id, op, at)
        SELECT ?1, 'note', ?2, 'upsert', ?3
         WHERE ${shiftSqlPlaceholders(mutationGuard, 3)}`,
-    ).bind(context.userId, row.id, now, ...mutationValues),
+    ).bind(noteUserId, row.id, now, ...mutationValues),
   )
   const [updated] = await context.env.DB.batch(statements)
   if (!updated?.meta.changes) {
@@ -396,7 +409,7 @@ async function patchNote(
       { title: row.title, content: row.content },
       { title: newTitle, content: newContent },
     )) {
-    await enqueueNoteIndex(context.env.DB, context.userId, row.id, 'embed')
+    await enqueueNoteIndex(context.env.DB, noteUserId, row.id, 'embed')
   }
   await afterMutation(context)
   return note
@@ -464,10 +477,26 @@ async function loadNoteOrNull(db: D1Database, userId: string, id: string): Promi
 
 async function loadNoteRow(db: D1Database, userId: string, id: string): Promise<NoteRow> {
   const row = await db.prepare(
+    `SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')}`,
+  ).bind(id, userId).first<NoteRow>()
+  if (!row) throw ApiError.notFound('Note not found')
+  return row
+}
+
+async function loadOwnedNoteRow(db: D1Database, userId: string, id: string): Promise<NoteRow> {
+  const row = await db.prepare(
     `SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND n.user_id = ?2`,
   ).bind(id, userId).first<NoteRow>()
   if (!row) throw ApiError.notFound('Note not found')
   return row
+}
+
+
+async function assertNoteWriteAccess(db: D1Database, userId: string, noteId: string): Promise<void> {
+  const row = await db.prepare(
+    `SELECT 1 AS ok FROM notes n WHERE n.id = ?1 AND ${noteWriteAccessSql('n', '?2')}`,
+  ).bind(noteId, userId).first<{ ok: number }>()
+  if (!row) throw ApiError.forbidden('You have read-only access to this shared note')
 }
 
 function assertExpectedRevision(row: NoteRow, expectedRev: number): void {

@@ -23,9 +23,10 @@ import {
 import { fromBase64Url, fromUtf8, sha256Hex, toBase64Url, utf8 } from '../lib/encoding'
 import { ApiError } from '../lib/errors'
 import { isValidId, newId } from '../lib/id'
-import { broadcastCursor, scheduleFtsDrain } from '../lib/notify'
+import { broadcastCursor, broadcastUserCursor, originOf, scheduleFtsDrain } from '../lib/notify'
 import { assertContentSize, clampInt, JSON_BODY_LIMITS, readJson } from '../lib/request'
 import { requireAuth } from '../middleware/auth'
+import { noteAccessSql, noteWriteAccessSql } from '../db/shared'
 import { aiDeleteNeededSql, embedTextUnchanged, enqueueNoteIndex, noteIndexQueueStatement } from '../mcp/ai-search'
 
 export const notesRoutes = new Hono<AppBindings>()
@@ -66,7 +67,9 @@ notesRoutes.get('/', async (c) => {
   const cursor = parseNotesListCursor(c.req.query('cursor'), view, sort, order)
 
   const binds: unknown[] = [userId]
-  let where = 'n.user_id = ?1'
+
+
+  let where = noteAccessSql('n', '?1')
 
   if (view === 'trash') {
     where += ' AND n.deleted_at IS NOT NULL'
@@ -162,6 +165,8 @@ notesRoutes.get('/', async (c) => {
   const rows = listResult?.results as NoteRow[] | undefined ?? []
   const pageRows = rows.slice(0, limit)
   const notes = pageRows.map(toNoteSummary)
+
+
   const body: ListNotesResponse = {
     notes,
     total,
@@ -250,6 +255,7 @@ notesRoutes.post('/trash/empty', async (c) => {
 
 
 notesRoutes.get('/:id', async (c) => {
+
   const note = await loadNote(c.env.DB, c.get('userId'), c.req.param('id'))
   return c.json(note)
 })
@@ -341,25 +347,37 @@ notesRoutes.post('/', async (c) => {
 })
 
 notesRoutes.patch('/:id', async (c) => {
-  const userId = c.get('userId')
+  const actorUserId = c.get('userId')
   const id = c.req.param('id')
   const { ftsEnabled } = c.get('database')
   const body = await readJson<PatchNoteBody>(c, JSON_BODY_LIMITS.note)
 
   const row = await c.env.DB.prepare(
-    `SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND n.user_id = ?2`,
+    `SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')}`,
   )
-    .bind(id, userId)
+    .bind(id, actorUserId)
     .first<NoteRow>()
   if (!row) {
     const deletion = await c.env.DB.prepare(
       `SELECT MAX(seq) AS seq FROM changes
         WHERE user_id = ?1 AND entity = 'note' AND entity_id = ?2 AND op = 'delete'`,
     )
-      .bind(userId, id)
+      .bind(actorUserId, id)
       .first<{ seq: number | null }>()
     throw ApiError.notFound('Note not found', { deletionCursor: deletion?.seq ?? null })
   }
+
+
+  const isOwner = row.user_id === actorUserId
+  if (!isOwner) {
+    const canWrite = await c.env.DB.prepare(
+      `SELECT 1 AS ok FROM notes n WHERE n.id = ?1 AND ${noteWriteAccessSql('n', '?2')}`,
+    ).bind(id, actorUserId).first<{ ok: number }>()
+    if (!canWrite) throw ApiError.forbidden('You have read-only access to this shared note')
+  }
+
+
+  const noteUserId = row.user_id
 
   if (!Number.isInteger(body.rev) || body.rev < 1) {
     throw ApiError.badRequest('rev must be a positive integer')
@@ -386,6 +404,10 @@ notesRoutes.patch('/:id', async (c) => {
     if (value !== undefined && typeof value !== 'boolean') {
       throw ApiError.badRequest(`${key} must be a boolean`)
     }
+  }
+
+  if (!isOwner && body.folderId !== undefined && body.folderId !== row.folder_id) {
+    throw ApiError.forbidden('Shared grantees cannot move notes between folders')
   }
 
   const now = Math.max(Date.now(), row.updated_at + 1)
@@ -418,8 +440,8 @@ notesRoutes.patch('/:id', async (c) => {
     push(sets, binds, 'title', newTitle)
   }
 
-  if (body.folderId !== undefined && body.folderId !== row.folder_id) {
-    push(sets, binds, 'folder_id', await resolveFolderId(c.env.DB, userId, body.folderId))
+  if (isOwner && body.folderId !== undefined && body.folderId !== row.folder_id) {
+    push(sets, binds, 'folder_id', await resolveFolderId(c.env.DB, noteUserId, body.folderId))
   }
   if (typeof body.isPinned === 'boolean' && Number(body.isPinned) !== row.is_pinned) push(sets, binds, 'is_pinned', body.isPinned ? 1 : 0)
   if (typeof body.isStarred === 'boolean' && Number(body.isStarred) !== row.is_starred) push(sets, binds, 'is_starred', body.isStarred ? 1 : 0)
@@ -433,9 +455,9 @@ notesRoutes.patch('/:id', async (c) => {
   const mutationGuard = `EXISTS (SELECT 1 FROM notes
     WHERE id = ?1 AND user_id = ?2 AND rev = ?3
       AND content_hash = ?4 AND title = ?5 AND updated_at = ?6)`
-  const mutationValues = [id, userId, nextRev, newHash, newTitle, now] as const
+  const mutationValues = [id, noteUserId, nextRev, newHash, newTitle, now] as const
 
-  binds.push(id, userId, body.rev)
+  binds.push(id, noteUserId, body.rev)
   const update = c.env.DB.prepare(
     `UPDATE notes SET ${sets.join(', ')}
       WHERE id = ?${binds.length - 2} AND user_id = ?${binds.length - 1} AND rev = ?${binds.length}`,
@@ -457,7 +479,7 @@ notesRoutes.patch('/:id', async (c) => {
                  OR ?15 - COALESCE((SELECT MAX(created_at) FROM note_versions WHERE note_id = ?2), 0) > ?16
                  OR ?17 = 1)`,
       ).bind(
-        snapshotId, id, userId, row.title, row.content, utf8ByteLength(row.content), now,
+        snapshotId, id, noteUserId, row.title, row.content, utf8ByteLength(row.content), now,
         ...mutationValues,
         body.preserveVersion ? 1 : 0, now, SNAPSHOT_INTERVAL_MS, bigChange ? 1 : 0,
       ),
@@ -474,7 +496,7 @@ notesRoutes.patch('/:id', async (c) => {
   if (row.deleted_at === null && (contentChanged || newTitle !== row.title)) {
     const derived = buildNoteDerivedStatements({
       db: c.env.DB,
-      userId,
+      userId: noteUserId,
       noteId: id,
       title: newTitle,
       content: newContent,
@@ -495,7 +517,7 @@ notesRoutes.patch('/:id', async (c) => {
           `DELETE FROM tags WHERE user_id = ?1 AND is_manual = 0
              AND ${shiftSqlPlaceholders(mutationGuard, 1)}
              AND NOT EXISTS (SELECT 1 FROM note_tags WHERE tag_id = tags.id)`,
-        ).bind(userId, ...mutationValues),
+        ).bind(noteUserId, ...mutationValues),
       )
     }
   }
@@ -506,13 +528,13 @@ notesRoutes.patch('/:id', async (c) => {
        SELECT ?1, 'note', ?2, 'upsert', ?3
         WHERE ${shiftSqlPlaceholders(mutationGuard, 3)}
        RETURNING seq`,
-    ).bind(userId, id, now, ...mutationValues),
+    ).bind(noteUserId, id, now, ...mutationValues),
   )
 
   const results = await c.env.DB.batch(statements)
   const updateResult = results[0]
   if (!updateResult?.meta.changes) {
-    const current = await loadNote(c.env.DB, userId, id)
+    const current = await loadNote(c.env.DB, actorUserId, id)
     throw ApiError.conflict('This note was modified elsewhere', { server: current })
   }
   const changeResult = results.at(-1) as D1Result<{ seq: number }> | undefined
@@ -523,7 +545,7 @@ notesRoutes.patch('/:id', async (c) => {
         WHERE user_id = ?1 AND id <> ?2 AND deleted_at IS NULL AND title_key IN (?3, ?4)
         LIMIT 1`,
     ).bind(
-      userId,
+      noteUserId,
       id,
       normalizeLinkKey(row.title),
       normalizeLinkKey(newTitle),
@@ -531,7 +553,7 @@ notesRoutes.patch('/:id', async (c) => {
     if (!ambiguous) {
       const rewrite = await rewriteInboundWikiLinks(
         c.env.DB,
-        userId,
+        noteUserId,
         id,
         row.title,
         newTitle,
@@ -549,7 +571,7 @@ notesRoutes.patch('/:id', async (c) => {
               WHERE id = ?3 AND user_id = ?1 AND rev = ?4
                 AND title = ?5 AND updated_at = ?6 AND deleted_at IS NULL)`,
       ).bind(
-        userId,
+        noteUserId,
         normalizeLinkKey(row.title),
         id,
         nextRev,
@@ -559,15 +581,20 @@ notesRoutes.patch('/:id', async (c) => {
     }
   }
   await broadcastCursor(c, rewroteInbound ? undefined : changeResult?.results?.[0]?.seq)
+  if (isOwner === false) {
+
+    const waitUntil = (task: Promise<unknown>) => { c.executionCtx?.waitUntil(task) }
+    await broadcastUserCursor(c.env, noteUserId, originOf(c), undefined, waitUntil).catch(() => {})
+  }
   if (contentChanged || newTitle !== row.title) {
-    // An edit that leaves the embedded head of the note alone (typing at the
-    // end of a long note) does not need a new embedding queue write.
+
+
     const embedNeeded = !embedTextUnchanged(
       { title: row.title, content: row.content },
       { title: newTitle, content: newContent },
     )
-    if (embedNeeded) await enqueueNoteIndex(c.env.DB, userId, id, 'embed')
-    scheduleFtsDrain(c)
+    if (embedNeeded) await enqueueNoteIndex(c.env.DB, noteUserId, id, 'embed')
+    scheduleFtsDrain(c, 5, noteUserId)
   }
   const nextTags = contentChanged ? (derivedTags ?? extractTags(newContent)) : null
   return c.json(toNote(applyPatchRow(row, sets, binds, nextTags)))
@@ -578,7 +605,7 @@ notesRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id')
   const { ftsEnabled } = c.get('database')
 
-  const row = await loadNoteRow(c.env.DB, userId, id)
+  const row = await loadOwnedNoteRow(c.env.DB, userId, id)
   if (row.deleted_at !== null) throw ApiError.notFound('The note does not exist or is in the trash')
   const now = Math.max(Date.now(), row.updated_at + 1)
   const nextRev = row.rev + 1
@@ -635,7 +662,7 @@ notesRoutes.post('/:id/restore', async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')
   const { ftsEnabled } = c.get('database')
-  const row = await loadNoteRow(c.env.DB, userId, id)
+  const row = await loadOwnedNoteRow(c.env.DB, userId, id)
   if (row.deleted_at === null) throw ApiError.badRequest('The note is not in the trash')
 
   const now = Math.max(Date.now(), row.updated_at + 1)
@@ -677,7 +704,7 @@ notesRoutes.delete('/:id/purge', async (c) => {
   const userId = c.get('userId')
   const id = c.req.param('id')
   const { ftsEnabled } = c.get('database')
-  const row = await loadNoteRow(c.env.DB, userId, id)
+  const row = await loadOwnedNoteRow(c.env.DB, userId, id)
   if (row.deleted_at === null) throw ApiError.notFound('The note does not exist or is not in the trash')
   const guard = `EXISTS (SELECT 1 FROM notes
     WHERE id = ?1 AND user_id = ?2 AND rev = ?3 AND deleted_at IS NOT NULL)`
@@ -752,7 +779,7 @@ notesRoutes.delete('/:id/purge', async (c) => {
 notesRoutes.post('/:id/duplicate', async (c) => {
   const userId = c.get('userId')
   const { ftsEnabled } = c.get('database')
-  const source = await loadNoteRow(c.env.DB, userId, c.req.param('id'))
+  const source = await loadOwnedNoteRow(c.env.DB, userId, c.req.param('id'))
   const body = c.req.header('Content-Type')?.includes('application/json')
     ? await readJson<{ id?: string }>(c, JSON_BODY_LIMITS.small)
     : {}
@@ -831,11 +858,13 @@ notesRoutes.post('/:id/duplicate', async (c) => {
 
 
 notesRoutes.get('/:id/versions', async (c) => {
+
+  const note = await loadNoteRow(c.env.DB, c.get('userId'), c.req.param('id'))
   const { results } = await c.env.DB.prepare(
     `SELECT id, note_id, title, length(CAST(content AS BLOB)) AS size, created_at FROM note_versions
        WHERE note_id = ?1 AND user_id = ?2 ORDER BY created_at DESC LIMIT 100`,
   )
-    .bind(c.req.param('id'), c.get('userId'))
+    .bind(note.id, note.user_id)
     .all<{ id: string; note_id: string; title: string; size: number; created_at: number }>()
 
   return c.json({
@@ -850,11 +879,12 @@ notesRoutes.get('/:id/versions', async (c) => {
 })
 
 notesRoutes.get('/:id/versions/:versionId', async (c) => {
+  const note = await loadNoteRow(c.env.DB, c.get('userId'), c.req.param('id'))
   const row = await c.env.DB.prepare(
     `SELECT id, note_id, title, content, length(CAST(content AS BLOB)) AS size, created_at FROM note_versions
        WHERE id = ?1 AND note_id = ?2 AND user_id = ?3`,
   )
-    .bind(c.req.param('versionId'), c.req.param('id'), c.get('userId'))
+    .bind(c.req.param('versionId'), note.id, note.user_id)
     .first<{
       id: string
       note_id: string
@@ -879,14 +909,13 @@ notesRoutes.post('/:id/versions/:versionId/restore', async (c) => {
   const id = c.req.param('id')
   const { ftsEnabled } = c.get('database')
 
+  const current = await loadOwnedNoteRow(c.env.DB, userId, id)
   const version = await c.env.DB.prepare(
     `SELECT title, content FROM note_versions WHERE id = ?1 AND note_id = ?2 AND user_id = ?3`,
   )
-    .bind(c.req.param('versionId'), id, userId)
+    .bind(c.req.param('versionId'), id, current.user_id)
     .first<{ title: string; content: string }>()
   if (!version) throw ApiError.notFound('Version not found')
-
-  const current = await loadNoteRow(c.env.DB, userId, id)
   const now = Math.max(Date.now(), current.updated_at + 1)
   const { words, chars } = countText(version.content)
   const title = restoredVersionTitle(version.title)
@@ -957,18 +986,17 @@ notesRoutes.post('/:id/versions/:versionId/restore', async (c) => {
 
 
 notesRoutes.get('/:id/backlinks', async (c) => {
-  const userId = c.get('userId')
   const id = c.req.param('id')
-  const note = await loadNoteRow(c.env.DB, userId, id)
+  const note = await loadNoteRow(c.env.DB, c.get('userId'), id)
 
   const { results } = await c.env.DB.prepare(
     `SELECT n.id, n.title, n.content FROM links l
        JOIN notes n ON n.id = l.source_note_id
       WHERE l.user_id = ?1 AND l.target_note_id = ?2
-        AND n.deleted_at IS NULL AND n.id != ?2
+        AND n.deleted_at IS NULL AND n.id != ?2 AND ${noteAccessSql('n', '?3')}
        ORDER BY n.updated_at DESC LIMIT 50`,
   )
-    .bind(userId, id)
+    .bind(note.user_id, id, c.get('userId'))
     .all<{ id: string; title: string; content: string }>()
 
   return c.json({
@@ -985,7 +1013,18 @@ async function loadNote(db: D1Database, userId: string, id: string): Promise<Not
   return toNote(await loadNoteRow(db, userId, id))
 }
 
+
 async function loadNoteRow(db: D1Database, userId: string, id: string): Promise<NoteRow> {
+  const row = await db
+    .prepare(`SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')}`)
+    .bind(id, userId)
+    .first<NoteRow>()
+  if (!row) throw ApiError.notFound('Note not found')
+  return row
+}
+
+
+async function loadOwnedNoteRow(db: D1Database, userId: string, id: string): Promise<NoteRow> {
   const row = await db
     .prepare(`SELECT ${NOTE_COLUMNS_FULL} FROM notes n WHERE n.id = ?1 AND n.user_id = ?2`)
     .bind(id, userId)

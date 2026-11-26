@@ -162,9 +162,8 @@ function runScheduledFtsDrain(
  * pauses rather than one per save. Search freshness is unaffected: reads merge
  * the notes still in the queue straight from `notes`.
  */
-export function scheduleFtsDrain(c: Context<AppBindings>, max = 5): void {
+export function scheduleFtsDrain(c: Context<AppBindings>, max = 5, userId = c.get('userId')): void {
   if (!c.get('database').ftsEnabled || !c.executionCtx) return
-  const userId = c.get('userId')
   const db = c.env.DB
   let byUser = scheduledFtsDrains.get(db)
   if (!byUser) {

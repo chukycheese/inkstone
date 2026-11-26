@@ -16,6 +16,7 @@ import { broadcastUserCursor } from '../lib/notify'
 import { hashPassword } from '../lib/password'
 import { consumeAttemptBudget, ThrottleError } from '../lib/throttle'
 import { tryConsumeSearchBudgetCall } from '../lib/search-budget'
+import { noteAccessSql } from '../db/shared'
 import { runIdempotent } from './operations'
 import { folderPromotionOrder } from '../routes/folders'
 import { rewriteTagInNotes } from '../routes/tags'
@@ -25,10 +26,7 @@ interface LibraryContext extends McpWriteContext {
   origin: string
 }
 
-/**
- * CKCZ-31: per-request full-content row ceiling for property queries (was
- * an uncapped-feeling 500). Each scanned row pulls the whole note body.
- */
+
 export const MCP_PROPERTY_SCAN_LIMIT = 200
 
 interface FolderRow {
@@ -69,12 +67,13 @@ export async function listMcpNoteVersions(
   noteId: string,
   limit = 20,
 ) {
-  await requireOwnedNote(db, userId, noteId)
+
+  const ownerUserId = await requireNoteReadAccess(db, userId, noteId)
   const { results } = await db.prepare(
     `SELECT id, title, size, created_at FROM note_versions
       WHERE note_id = ?1 AND user_id = ?2
       ORDER BY created_at DESC, id DESC LIMIT ?3`,
-  ).bind(noteId, userId, Math.max(1, Math.min(50, limit))).all<{
+  ).bind(noteId, ownerUserId, Math.max(1, Math.min(50, limit))).all<{
     id: string
     title: string
     size: number
@@ -97,11 +96,12 @@ export async function readMcpNoteVersion(
   noteId: string,
   versionId: string,
 ) {
+  const ownerUserId = await requireNoteReadAccess(db, userId, noteId)
   const row = await db.prepare(
     `SELECT v.id, v.title, v.content, v.size, v.created_at
        FROM note_versions v JOIN notes n ON n.id = v.note_id
       WHERE v.id = ?1 AND v.note_id = ?2 AND v.user_id = ?3 AND n.user_id = ?3`,
-  ).bind(versionId, noteId, userId).first<{
+  ).bind(versionId, noteId, ownerUserId).first<{
     id: string
     title: string
     content: string
@@ -141,7 +141,7 @@ export async function restoreMcpNoteVersion(
 
 export async function getMcpNoteProperties(db: D1Database, userId: string, noteId: string) {
   const row = await db.prepare(
-    `SELECT title, content, rev FROM notes WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL`,
+    `SELECT title, content, rev FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')} AND n.deleted_at IS NULL`,
   ).bind(noteId, userId).first<{ title: string; content: string; rev: number }>()
   if (!row) throw ApiError.notFound('Note not found')
   const parsed = parseFrontMatter(row.content)
@@ -160,7 +160,7 @@ export async function updateMcpNoteProperties(
   },
 ) {
   const row = await context.env.DB.prepare(
-    `SELECT content FROM notes WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL`,
+    `SELECT content FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')} AND n.deleted_at IS NULL`,
   ).bind(input.noteId, context.userId).first<{ content: string }>()
   if (!row) throw ApiError.notFound('Note not found')
   const parsed = parseFrontMatter(row.content)
@@ -194,16 +194,16 @@ export async function queryMcpNoteProperties(
     limit?: number
   },
 ) {
-  // CKCZ-31: this path reads every scanned note's full content (giant table
-  // notes included), so an uncapped full-library scan per call is the
-  // fastest way a mass MCP session burns the daily rows-read quota.
+
+
+
   const budget = await tryConsumeSearchBudgetCall(db, userId, 'property-query')
   if (!budget.allowed) {
     throw new ApiError(429, 'too_many_attempts', `Daily search budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
   }
   const { results } = await db.prepare(
-    `SELECT id, title, content, rev, updated_at FROM notes
-      WHERE user_id = ?1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ${MCP_PROPERTY_SCAN_LIMIT}`,
+    `SELECT id, title, content, rev, updated_at FROM notes n
+      WHERE ${noteAccessSql('n', '?1')} AND n.deleted_at IS NULL ORDER BY updated_at DESC LIMIT ${MCP_PROPERTY_SCAN_LIMIT}`,
   ).bind(userId).all<{ id: string; title: string; content: string; rev: number; updated_at: number }>()
   const limit = Math.max(1, Math.min(50, input.limit ?? 20))
   const matches = []
@@ -600,10 +600,13 @@ export async function removeMcpFolderAndPromote(
                 WHERE id = ?1 AND user_id = ?2 AND updated_at = ?3 AND deleted_at = ?5)`,
         ).bind(current.id, context.userId, current.updated_at, current.parent_id, now),
         context.env.DB.prepare(
+          `DELETE FROM folder_shares WHERE folder_id = ?1 AND owner_user_id = ?2`,
+        ).bind(current.id, context.userId),
+        context.env.DB.prepare(
           `DELETE FROM folders WHERE id = ?1 AND user_id = ?2 AND updated_at = ?3 AND deleted_at = ?4`,
         ).bind(current.id, context.userId, current.updated_at, now),
       ])
-      if (!results[6]?.meta.changes) throw ApiError.conflict('The folder changed elsewhere')
+      if (!results[7]?.meta.changes) throw ApiError.conflict('The folder changed elsewhere')
       await notifyMutation(context)
       return { ok: true, folder_id: current.id, promoted_to: current.parent_id }
     },
@@ -684,7 +687,7 @@ export async function exploreMcpGraph(
   depth = 2,
   maxNodes = 60,
 ) {
-  await requireOwnedNote(db, userId, rootId)
+  await requireNoteReadAccess(db, userId, rootId)
   const cappedDepth = Math.max(1, Math.min(3, depth))
   const cappedNodes = Math.max(2, Math.min(100, maxNodes))
   const nodes = new Map<string, { id: string; title: string; excerpt: string }>()
@@ -694,7 +697,7 @@ export async function exploreMcpGraph(
     const next = new Set<string>()
     for (const id of frontier) {
       const note = await db.prepare(
-        `SELECT id, title, excerpt FROM notes WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL`,
+        `SELECT id, title, excerpt FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')} AND n.deleted_at IS NULL`,
       ).bind(id, userId).first<{ id: string; title: string; excerpt: string }>()
       if (!note) continue
       nodes.set(id, note)
@@ -1066,6 +1069,15 @@ function duplicateTitle(title: string): string {
   const suffix = ' copy'
   const base = title.trim() || 'Untitled note'
   return `${base.slice(0, Math.max(0, LIMITS.titleMaxLength - suffix.length))}${suffix}`
+}
+
+
+async function requireNoteReadAccess(db: D1Database, userId: string, noteId: string): Promise<string> {
+  const row = await db.prepare(
+    `SELECT n.user_id FROM notes n WHERE n.id = ?1 AND ${noteAccessSql('n', '?2')}`,
+  ).bind(noteId, userId).first<{ user_id: string }>()
+  if (!row) throw ApiError.notFound('Note not found')
+  return row.user_id
 }
 
 async function requireOwnedNote(db: D1Database, userId: string, noteId: string): Promise<void> {

@@ -2,12 +2,13 @@ import { Hono } from 'hono'
 import { LIMITS } from '@shared/constants'
 import { organizerColorOrNull } from '@shared/organizer-colors'
 import { truncateText } from '@shared/text-utils'
-import type { Folder } from '@shared/types'
+import type { Folder, FolderShare } from '@shared/types'
 import type { AppBindings } from '../env'
 import { toFolder, type FolderRow } from '../db/rows'
 import { FTS_QUEUE_CONFLICT_SQL } from '../db/writes'
 import { ApiError } from '../lib/errors'
 import { isValidId, newId } from '../lib/id'
+import { isFolderShareRole, type FolderShareRole } from '../db/shared'
 import { broadcastCursor } from '../lib/notify'
 import { JSON_BODY_LIMITS, readJson } from '../lib/request'
 import { requireAuth } from '../middleware/auth'
@@ -20,14 +21,36 @@ foldersRoutes.use('*', requireAuth)
 const FOLDER_SELECT = `f.id, f.parent_id, f.name, f.icon, f.color, f.position, f.created_at, f.updated_at`
 
 foldersRoutes.get('/', async (c) => {
+  const userId = c.get('userId')
   const { results } = await c.env.DB.prepare(
     `SELECT ${FOLDER_SELECT} FROM folders f
       WHERE f.user_id = ?1 AND f.deleted_at IS NULL
       ORDER BY f.position ASC, f.created_at ASC, f.id ASC`,
   )
-    .bind(c.get('userId'))
+    .bind(userId)
     .all<FolderRow>()
-  return c.json({ folders: results.map(toFolder) })
+
+
+  const { results: shared } = await c.env.DB.prepare(
+    `SELECT ${FOLDER_SELECT}, fs.role AS share_role, f.user_id AS owner_user_id,
+       u.name AS owner_name, u.login AS owner_login
+     FROM folder_shares fs
+     JOIN folders f ON f.id = fs.folder_id AND f.deleted_at IS NULL AND f.user_id = fs.owner_user_id
+     LEFT JOIN users u ON u.id = f.user_id
+     WHERE fs.grantee_user_id = ?1
+     ORDER BY f.name COLLATE NOCASE ASC, f.id ASC`,
+  )
+    .bind(userId)
+    .all<FolderRow & { share_role: string; owner_user_id: string; owner_name: string | null; owner_login: string | null }>()
+  const owned = results.map((row) => ({ ...toFolder(row), shared: false as const }))
+  const sharedFolders = shared.map((row) => ({
+    ...toFolder(row),
+    shared: true as const,
+    ownerUserId: row.owner_user_id,
+    shareRole: (isFolderShareRole(row.share_role) ? row.share_role : 'read') as FolderShareRole,
+    ownerName: row.owner_name ?? row.owner_login ?? '',
+  }))
+  return c.json({ folders: [...owned, ...sharedFolders] })
 })
 
 foldersRoutes.post('/', async (c) => {
@@ -330,6 +353,10 @@ foldersRoutes.delete('/:id', async (c) => {
         `DELETE FROM folders WHERE id = ?1 AND user_id = ?2 AND updated_at = ?3
           AND deleted_at = ?4`,
       ).bind(id, userId, row.updated_at, now),
+
+      c.env.DB.prepare(
+        `DELETE FROM folder_shares WHERE folder_id = ?1 AND owner_user_id = ?2`,
+      ).bind(id, userId),
     ]
     const results = await c.env.DB.batch(statements)
     if (!results.at(-1)?.meta.changes) throw ApiError.conflict('The folder changed elsewhere. Refresh and try again')
@@ -379,6 +406,9 @@ foldersRoutes.delete('/:id', async (c) => {
           updated_at = MAX(updated_at + 1, ?4), rev = rev + 1
           WHERE user_id = ?2 AND folder_id IN (SELECT id FROM subtree)`,
       ).bind(id, userId, row.updated_at, now),
+      c.env.DB.prepare(
+        `${tree} DELETE FROM folder_shares WHERE owner_user_id = ?2 AND folder_id IN (SELECT id FROM subtree)`,
+      ).bind(id, userId, row.updated_at),
       c.env.DB.prepare(
         `${tree} DELETE FROM folders WHERE user_id = ?2 AND id IN (SELECT id FROM subtree)`,
       ).bind(id, userId, row.updated_at),
@@ -651,3 +681,122 @@ function subtreeHeight(graph: FolderGraph, rootId: string): number {
   }
   return height
 }
+
+
+
+
+
+interface ShareGranteeRow {
+  id: string
+  name: string
+  login: string
+}
+
+async function loadOwnedShareableFolder(
+  db: D1Database,
+  userId: string,
+  folderId: string,
+): Promise<{ id: string; user_id: string }> {
+  const row = await db
+    .prepare(`SELECT id, user_id FROM folders WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL`)
+    .bind(folderId, userId)
+    .first<{ id: string; user_id: string }>()
+  if (!row) throw ApiError.notFound('Folder not found')
+  return row
+}
+
+async function listFolderShares(db: D1Database, folderId: string): Promise<FolderShare[]> {
+  const { results } = await db.prepare(
+    `SELECT fs.folder_id, fs.owner_user_id, fs.grantee_user_id, fs.role,
+       u.name AS grantee_name, u.login AS grantee_login
+     FROM folder_shares fs LEFT JOIN users u ON u.id = fs.grantee_user_id
+     WHERE fs.folder_id = ?1
+     ORDER BY fs.grantee_user_id ASC`,
+  ).bind(folderId).all<{
+    folder_id: string
+    owner_user_id: string
+    grantee_user_id: string
+    role: string
+    grantee_name: string | null
+    grantee_login: string | null
+  }>()
+  return results.map((row) => ({
+    folderId: row.folder_id,
+    ownerUserId: row.owner_user_id,
+    granteeUserId: row.grantee_user_id,
+    role: isFolderShareRole(row.role) ? row.role : 'read',
+    granteeName: row.grantee_name ?? row.grantee_login ?? '',
+    granteeLogin: row.grantee_login ?? '',
+  }))
+}
+
+
+foldersRoutes.post('/:id/shares', async (c) => {
+  const userId = c.get('userId')
+  const id = c.req.param('id')
+  const folder = await loadOwnedShareableFolder(c.env.DB, userId, id)
+  const body = await readJson<{
+    granteeId?: string
+    grantee?: string
+    granteeUserId?: string
+    userId?: string
+    role?: string
+  }>(c, JSON_BODY_LIMITS.small)
+
+  const granteeRef = (body.granteeId ?? body.granteeUserId ?? body.grantee ?? body.userId ?? '').trim()
+  if (!granteeRef) throw ApiError.badRequest('granteeId is required')
+  if (granteeRef.length > 128) throw ApiError.badRequest('granteeId is too long')
+  if (!isFolderShareRole(body.role)) throw ApiError.badRequest('role must be read or write')
+
+
+
+  const grantee = await c.env.DB.prepare(
+    `SELECT id, name, login FROM users
+      WHERE id = ?1 OR username = ?1 COLLATE NOCASE OR login = ?1 COLLATE NOCASE
+      ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END LIMIT 1`,
+  ).bind(granteeRef).first<ShareGranteeRow>()
+  if (!grantee) throw ApiError.notFound('Grantee user not found')
+  if (grantee.id === userId) throw ApiError.badRequest('Cannot share a folder with yourself')
+
+  await c.env.DB.prepare(
+    `INSERT INTO folder_shares (folder_id, owner_user_id, grantee_user_id, role)
+     VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(folder_id, grantee_user_id) DO UPDATE SET role = excluded.role`,
+  ).bind(folder.id, userId, grantee.id, body.role).run()
+
+
+  await c.env.DB.prepare(
+    `INSERT INTO changes (user_id, entity, entity_id, op, at) VALUES (?1, 'folder', ?2, 'upsert', ?3)`,
+  ).bind(grantee.id, folder.id, Date.now()).run()
+  await broadcastCursor(c)
+
+  const shares = await listFolderShares(c.env.DB, folder.id)
+  const share = shares.find((entry) => entry.granteeUserId === grantee.id)!
+  return c.json({ share, shares }, 201)
+})
+
+
+foldersRoutes.get('/:id/shares', async (c) => {
+  const userId = c.get('userId')
+  const id = c.req.param('id')
+  await loadOwnedShareableFolder(c.env.DB, userId, id)
+  return c.json({ shares: await listFolderShares(c.env.DB, id) })
+})
+
+
+foldersRoutes.delete('/:id/shares/:granteeId', async (c) => {
+  const userId = c.get('userId')
+  const id = c.req.param('id')
+  const granteeId = c.req.param('granteeId')
+  await loadOwnedShareableFolder(c.env.DB, userId, id)
+  const removed = await c.env.DB.prepare(
+    `DELETE FROM folder_shares WHERE folder_id = ?1 AND grantee_user_id = ?2 AND owner_user_id = ?3`,
+  ).bind(id, granteeId, userId).run()
+  if (removed.meta.changes) {
+    await c.env.DB.prepare(
+      `INSERT INTO changes (user_id, entity, entity_id, op, at) VALUES (?1, 'folder', ?2, 'delete', ?3)`,
+    ).bind(granteeId, id, Date.now()).run()
+  }
+  await broadcastCursor(c)
+  return c.json({ ok: true, removed: removed.meta.changes > 0 })
+})

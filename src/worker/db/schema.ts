@@ -1,4 +1,4 @@
-/** Defines the idempotent final D1 schema initialized by every Worker isolate. */
+
 import type { DatabaseState, Env } from '../env'
 import { getMeta, setMeta } from './metadata'
 
@@ -52,6 +52,18 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_folders_user ON folders(user_id, parent_id, position)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_unique_sibling
      ON folders(user_id, IFNULL(parent_id, ''), lower(name)) WHERE deleted_at IS NULL`,
+
+  `CREATE TABLE IF NOT EXISTS folder_shares (
+    folder_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    grantee_user_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('read', 'write')),
+    PRIMARY KEY (folder_id, grantee_user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_folder_shares_grantee
+     ON folder_shares(grantee_user_id, folder_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_folder_shares_owner
+     ON folder_shares(owner_user_id, folder_id)`,
 
   `CREATE TABLE IF NOT EXISTS notes (
     id TEXT PRIMARY KEY,
@@ -356,8 +368,8 @@ interface SchemaMigration {
 
 const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
   {
-    // Explicit whitelist (not a regex over SCHEMA_STATEMENTS) so later
-    // additions like mcp_api_keys can never be picked up accidentally.
+
+
     version: 1,
     statements: [
       `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -384,10 +396,10 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
     ],
   },
   {
-    // Only CREATE TABLE / INDEX statements: D1 does not reliably support
-    // ALTER TABLE ADD COLUMN with constraints, so the AI search preference
-    // lives in app_meta (key `ai-search-enabled:<userId>`) instead of a
-    // new column on the pre-existing mcp_preferences table.
+
+
+
+
     version: 2,
     statements: [
       `CREATE TABLE IF NOT EXISTS mcp_api_keys (
@@ -552,6 +564,24 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
          ON push_subscriptions(user_id, created_at DESC)`,
     ],
   },
+  {
+
+
+    version: 15,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS folder_shares (
+        folder_id TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL,
+        grantee_user_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('read', 'write')),
+        PRIMARY KEY (folder_id, grantee_user_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_folder_shares_grantee
+         ON folder_shares(grantee_user_id, folder_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_folder_shares_owner
+         ON folder_shares(owner_user_id, folder_id)`,
+    ],
+  },
 ]
 
 const FTS_STATEMENT = `CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
@@ -576,6 +606,7 @@ const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   schema_migrations: ['version', 'applied_at'],
   users: ['id', 'username', 'password_hash', 'login', 'name', 'avatar_url', 'role', 'settings', 'created_at', 'last_seen_at'],
   folders: ['id', 'user_id', 'parent_id', 'name', 'icon', 'color', 'position', 'created_at', 'updated_at', 'deleted_at'],
+  folder_shares: ['folder_id', 'owner_user_id', 'grantee_user_id', 'role'],
   notes: ['id', 'user_id', 'folder_id', 'title', 'title_key', 'content', 'excerpt', 'rev', 'word_count', 'char_count', 'is_pinned', 'is_starred', 'is_archived', 'position', 'content_hash', 'created_at', 'updated_at', 'deleted_at'],
   tags: ['id', 'user_id', 'name', 'color', 'is_manual', 'created_at'],
   note_tags: ['note_id', 'tag_id'],
@@ -609,6 +640,7 @@ const REQUIRED_TABLES = [
   'schema_migrations',
   'users',
   'folders',
+  'folder_shares',
   'notes',
   'tags',
   'note_tags',
@@ -640,6 +672,8 @@ const REQUIRED_TABLES = [
 const REQUIRED_INDEXES = [
   'idx_folders_user',
   'idx_folders_unique_sibling',
+  'idx_folder_shares_grantee',
+  'idx_folder_shares_owner',
   'idx_notes_user_updated',
   'idx_notes_folder',
   'idx_notes_starred',
@@ -707,9 +741,9 @@ async function createSchema(db: D1Database): Promise<DatabaseState> {
   if (!initialized) {
     await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)))
   } else {
-    // Existing installations must converge additively. CREATE IF NOT EXISTS
-    // never rewrites user data; running table creation before indexes also
-    // lets a partially initialized database recover missing feature tables.
+
+
+
     await db.batch(TABLE_SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)))
   }
   await applyMigrations(db)
@@ -744,8 +778,8 @@ async function upgradeFtsIdentifiers(db: D1Database): Promise<void> {
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes_fts'`,
   ).first<{ sql: string }>()
   if (!table || !/note_id\s+UNINDEXED/i.test(table.sql)) return
-  // Keep the existing indexed text and rowids. The batch either replaces the
-  // complete index or rolls back, including when an old installation retries.
+
+
   await db.batch([
     db.prepare(FTS_STATEMENT.replace('notes_fts', 'notes_fts_identifiers')),
     db.prepare(`INSERT INTO notes_fts_identifiers (rowid, note_id, user_id, title, body)

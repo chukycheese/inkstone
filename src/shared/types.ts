@@ -178,6 +178,27 @@ export interface Folder {
   updatedAt: number
 
   noteCount?: number
+
+  
+  shared?: boolean
+  
+  ownerUserId?: string
+  
+  shareRole?: FolderShareRole
+  
+  ownerName?: string
+}
+
+
+export type FolderShareRole = 'read' | 'write'
+
+export interface FolderShare {
+  folderId: string
+  ownerUserId: string
+  granteeUserId: string
+  role: FolderShareRole
+  granteeName?: string
+  granteeLogin?: string
 }
 
 export interface Tag {

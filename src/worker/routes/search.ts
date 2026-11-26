@@ -14,35 +14,24 @@ import { clampInt } from '../lib/request'
 import { tryConsumeSearchBudgetCall } from '../lib/search-budget'
 import { consumeAttemptBudget, ThrottleError } from '../lib/throttle'
 import { requireAuth } from '../middleware/auth'
+import { noteAccessSql } from '../db/shared'
+import { sharedOwnerIds } from '../db/shared'
 
 export const searchRoutes = new Hono<AppBindings>()
 
 const GRAPH_EDGE_CANDIDATE_LIMIT = 10_000
 
-/**
- * CKCZ-26: FTS `MATCH` + `bm25()` scores every match before LIMIT runs, so a
- * large limit multiplies rows read per query. The FTS path is capped well
- * below the old route maximum (200).
- */
+
 export const FTS_MAX_LIMIT = 50
-/** Route-level ceiling for `GET /api/search` (was 200). */
+
 export const SEARCH_ROUTE_MAX_LIMIT = 50
-/** LIKE fallback over-fetch multiplier cap (was `limit * 3` up to 600). */
+
 export const LIKE_CANDIDATE_MULTIPLIER = 2
 export const LIKE_CANDIDATE_HARD_CAP = 100
-/**
- * How many notes whose FTS entry is still settling are read straight from
- * `notes` to supplement an FTS result. Past this window the queue is treated
- * as a genuinely stale index (bulk import, fresh database) and the LIKE scan
- * takes over.
- */
+
 export const PENDING_FTS_MERGE_MAX = 8
 
-/**
- * Common English + Korean words with no retrieval signal. A query made only
- * of these would score the whole FTS index and return noise, so it skips
- * MATCH scoring and falls back to a bounded title-only LIKE scan instead.
- */
+
 export const SEARCH_STOPWORDS: ReadonlySet<string> = new Set([
   'the', 'a', 'an', 'of', 'to', 'in', 'for', 'on', 'with', 'and', 'or', 'not',
   'is', 'are', 'was', 'were', 'be', 'been', 'being', 'do', 'does', 'did',
@@ -57,19 +46,19 @@ export const SEARCH_STOPWORDS: ReadonlySet<string> = new Set([
   '와', '과', '도', '만', '에게', '한', '하다', '있다', '없다', '되다', '이다',
 ])
 
-/** True when every query term is a stop word (or there are no terms). */
+
 export function isStopwordOnlyQuery(q: ParsedQuery): boolean {
   if (!q.terms.length) return true
   return q.terms.every((term) => SEARCH_STOPWORDS.has(term.toLowerCase()))
 }
 
-/** Strip the `tag:`/`folder:`/`is:`/`in:` qualifiers parseQuery already consumed. */
+
 function stripQualifier(term: string): string {
   const colon = term.indexOf(':')
   return colon > 0 ? term.slice(colon + 1) : term
 }
 
-/** True when the raw query carries no retrieval signal beyond stop words. */
+
 export function isStopwordOnlyRaw(raw: string): boolean {
   const tokens = raw.split(/\s+/).map((t) => t.replace(/[^A-Za-z0-9가-힣]+/g, '')).filter(Boolean)
   if (!tokens.length) return true
@@ -181,22 +170,30 @@ export async function searchUserNotes(
   const query = parseQuery(truncateText(raw.trim(), 512))
   if (!raw.trim()) return { results: [], mode: ftsEnabled ? 'fts' : 'like', query }
 
-  // CKCZ-26: a stop-word-only query would score the whole FTS index for
-  // noise — skip MATCH and let likeSearch do a bounded title-only scan.
+
+
   const stopwordOnly = isStopwordOnlyQuery(query)
   let useFts = ftsEnabled && !stopwordOnly
   let pendingIds: string[] = []
   if (useFts) {
     try {
-      // Settled rows only: a note that changed moments ago is read below rather
-      // than re-indexed here, so a search never triggers a whole-note re-index.
-      if (drain) await drainFtsQueue(db, userId, 50)
-      // A note queued for re-index is usually the one being written right
-      // now. Reading those few notes directly keeps search current without
-      // dropping to the full-table LIKE scan for a stale queue entry.
-      const pending = await pendingFtsNoteIds(db, userId, PENDING_FTS_MERGE_MAX)
-      if (pending.truncated) useFts = false
-      else pendingIds = pending.ids
+
+
+
+
+      const owners = [userId, ...(await sharedOwnerIds(db, userId))]
+      if (drain) {
+        for (const owner of owners) await drainFtsQueue(db, owner, 50)
+      }
+
+
+
+      const pendingLists = await Promise.all(
+        owners.map((owner) => pendingFtsNoteIds(db, owner, PENDING_FTS_MERGE_MAX)),
+      )
+      const pendingIdsAll = pendingLists.flatMap((list) => list.ids)
+      if (pendingLists.some((list) => list.truncated)) useFts = false
+      else pendingIds = [...new Set(pendingIdsAll)].slice(0, PENDING_FTS_MERGE_MAX)
     } catch {
       useFts = false
     }
@@ -241,8 +238,8 @@ searchRoutes.get('/search', requireAuth, async (c) => {
   const raw = truncateText((c.req.query('q') ?? '').trim(), 512)
   const limit = clampInt(c.req.query('limit'), 1, SEARCH_ROUTE_MAX_LIMIT, LIMITS.searchLimit)
 
-  // CKCZ-26: per-user daily search-call guard — over-budget callers get a
-  // 429 instead of burning the account's D1 rows-read quota.
+
+
   const budget = await tryConsumeSearchBudgetCall(c.env.DB, userId, 'search')
   if (!budget.allowed) {
     throw new ApiError(429, 'too_many_attempts', `Daily search budget exceeded (${budget.used}/${budget.cap} calls) — try again tomorrow`)
@@ -288,8 +285,10 @@ async function ftsSearch(
   if (!match) return []
 
   const binds: unknown[] = [`{title body} : (${match})`, userId]
-  let where = `notes_fts MATCH ?1 AND notes_fts.user_id = ?2
-    AND n.user_id = ?2 AND n.deleted_at IS NULL`
+
+  let where = `notes_fts MATCH ?1
+    AND notes_fts.user_id = n.user_id AND n.deleted_at IS NULL
+    AND ${noteAccessSql('n', '?2')}`
   applyFilters(q, binds, (clause) => (where += clause))
   binds.push(q.terms[0]!)
   const contentWindow = contentWindowSql(binds.length)
@@ -326,12 +325,13 @@ async function likeSearch(
 ): Promise<SearchHit[]> {
   const binds: unknown[] = [userId]
   const termBindIndexes: number[] = []
-  let where = 'n.user_id = ?1'
+
+  let where = noteAccessSql('n', '?1')
   where += q.trash ? ' AND n.deleted_at IS NOT NULL' : ' AND n.deleted_at IS NULL'
 
-  // CKCZ-26: stop-word-only queries scan titles only (bounded, no full-body
-  // LIKE); real queries keep the title+content scan but with a smaller
-  // over-fetch window than the old `limit * 3` up to 600.
+
+
+
   const titleOnly = isStopwordOnlyQuery(q)
   for (const term of q.terms) {
     binds.push(`%${escapeLike(term)}%`)
@@ -381,11 +381,7 @@ async function likeSearch(
   }))
 }
 
-/**
- * Adds hits from the notes still queued for FTS indexing to an FTS result.
- * Only those note ids are scanned, so a note that is one settle window behind
- * the index still answers the query without the whole-table LIKE fallback.
- */
+
 async function mergePendingFtsHits(
   db: D1Database,
   userId: string,
@@ -406,7 +402,7 @@ async function mergePendingFtsHits(
   return merged.slice(0, limit)
 }
 
-/** LIKE match restricted to the given note ids. */
+
 async function pendingNoteHits(
   db: D1Database,
   userId: string,
@@ -416,7 +412,7 @@ async function pendingNoteHits(
 ): Promise<SearchHit[]> {
   if (!ids.length || !q.terms.length) return []
   const binds: unknown[] = [userId, JSON.stringify(ids)]
-  let where = `n.user_id = ?1 AND n.deleted_at IS NULL
+  let where = `${noteAccessSql('n', '?1')} AND n.deleted_at IS NULL
     AND n.id IN (SELECT value FROM json_each(?2))`
   for (const term of q.terms) {
     binds.push(`%${escapeLike(term)}%`)
