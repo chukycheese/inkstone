@@ -189,7 +189,7 @@ describe('semantic candidate loading', () => {
       HYDRATE,
     ])
     await search(reloadDb)
-    const full = reloadDb.queriesFor(/FROM ai_note_embeddings e\s+WHERE e.user_id = \?1\s+ORDER BY/)
+    const full = reloadDb.queriesFor(/FROM ai_note_embeddings e(?![\s\S]*indexed_at >=)[\s\S]*?ORDER BY/)
     expect(full).toHaveLength(1)
   })
 
